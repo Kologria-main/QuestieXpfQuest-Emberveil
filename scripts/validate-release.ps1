@@ -110,3 +110,8 @@ if (-not $SkipInstallerTests) {
 }
 
 Write-Host "PASS: release source and $($manifest.Count)-file payload manifest are valid." -ForegroundColor Green
+
+# The tamper-rejection test intentionally launches an installer that exits 1.
+# PowerShell 7 retains that native process code in $LASTEXITCODE even after every
+# assertion succeeds, so finish explicitly with the validation result.
+exit 0
