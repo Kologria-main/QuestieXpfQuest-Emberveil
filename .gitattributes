@@ -1,5 +1,9 @@
 * text=auto eol=lf
 
+# Payload hashes are byte-for-byte. Preserve the exact reviewed addon bytes on
+# every platform instead of applying checkout-time line-ending conversion.
+addon/** -text
+
 *.cmd text eol=crlf
 *.png binary
 *.tga binary
