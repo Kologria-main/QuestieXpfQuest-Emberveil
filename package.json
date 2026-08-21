@@ -1,0 +1,15 @@
+{
+  "name": "questie-emberveil-release-tools",
+  "private": true,
+  "version": "2.0.0-beta1.15",
+  "description": "Offline validation tools for the Questie Emberveil addon release.",
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "validate": "node scripts/validate-source.mjs && fengari tests/quest-state.lua",
+    "test:quest-state": "fengari tests/quest-state.lua"
+  },
+  "devDependencies": {
+    "fengari-node-cli": "0.1.0",
+    "luaparse": "0.3.1"
+  }
+}

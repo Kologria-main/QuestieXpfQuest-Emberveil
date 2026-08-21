@@ -1,0 +1,30 @@
+name: Validate release source
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Enable pnpm
+        shell: pwsh
+        run: corepack enable
+      - name: Install validation dependencies
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+      - name: Parse and test addon source
+        shell: pwsh
+        run: pnpm validate
+      - name: Verify payload and installer
+        shell: pwsh
+        run: .\scripts\validate-release.ps1
