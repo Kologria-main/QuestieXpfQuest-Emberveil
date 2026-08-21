@@ -1,5 +1,5 @@
 -- Questie Emberveil / pfQuest map engine
--- v2.0.0-beta1.15
+-- v2.0.0-beta1.18
 --
 -- Design:
 --   * pfQuest database + quest parser
@@ -33,6 +33,7 @@ EV.renderPrimeRequested = EV.renderPrimeRequested or false
 EV.renderPrimeAt = nil
 EV.renderPrimeUntil = nil
 EV.questRenderNudgeAt = nil
+EV.questRenderReason = nil
 
 -- Hidden world-map context recovery.
 -- Azeroth documents GetPlayerMapPosition() as coordinates on the currently
@@ -207,6 +208,25 @@ function EV:MarkMinimapNodeCacheDirty(reason)
   self.minimapNodeCache.dirty = true
   self.minimapNodeCache.reason = reason or "unknown"
   self.minimapForceNext = true
+end
+
+-- Called after a quest node transaction (NEW/RELOAD/REMOVE), not merely when
+-- the game event fires. This ordering is important: rebuilding the spatial
+-- cache before SearchQuestID finishes would cache the old node set and make
+-- accepted-quest objectives appear late.
+function EV:NotifyQuestNodesChanged(reason)
+  local now = GetTime()
+  self:MarkMinimapNodeCacheDirty("quest-nodes:" .. tostring(reason or "changed"))
+  self.worldMapForceNext = true
+  self.minimapForceNext = true
+  self.questRenderReason = reason or "changed"
+
+  -- One coalesced near-immediate render. Multiple quest-log events and several
+  -- nodes belonging to the same quest collapse into the same frame deadline.
+  local due = now + .01
+  if not self.questRenderNudgeAt or due < self.questRenderNudgeAt then
+    self.questRenderNudgeAt = due
+  end
 end
 
 function EV:GetMinimapNodeCache(mapID)
@@ -1070,7 +1090,12 @@ end
 function EV:Diagnostic()
   local mapID, mapName, cid, mid, mapInfo, viewKind = self:GetSelectedMapID()
   local p = self.player
-  local entries, quests = GetNumQuestLogEntries()
+  local entries, quests = 0, 0
+  if self.GetQuestLogCounts then
+    entries, quests = self:GetQuestLogCounts()
+  elseif type(GetNumQuestLogEntries) == "function" then
+    entries = tonumber(GetNumQuestLogEntries()) or 0
+  end
 
   chat("v" .. tostring(self.version)
     .. " engine=" .. tostring(self.engine)
@@ -1118,6 +1143,8 @@ function EV:Diagnostic()
 
   chat("questState ready=" .. tostring(self.questStateReady)
     .. " sync=" .. tostring(self.questSyncSource)
+    .. " availability=" .. tostring(self.availableQuestMode)
+    .. " authoritative=" .. tostring(self.questHistoryAuthoritative)
     .. " historyAuthoritative=" .. tostring(self.questHistoryAuthoritative)
     .. " availableGivers=" .. tostring(self:CanRenderAvailableQuests())
     .. " completed=" .. tostring(self.questSyncCount)
@@ -1365,9 +1392,19 @@ driver:SetScript("OnEvent", function()
   if event == "QUEST_LOG_UPDATE"
       or event == "QUEST_WATCH_UPDATE"
       or event == "QUEST_FINISHED" then
-    EV:MarkMinimapNodeCacheDirty("quest-event:" .. tostring(event))
+    -- Ask pfQuest to reconcile the quest log immediately. Cache invalidation is
+    -- intentionally deferred until the node transaction completes; otherwise
+    -- the minimap can rebuild a stale cache before NEW objectives are inserted.
+    if pfQuest then pfQuest.updateQuestLog = true end
     EV.worldMapForceNext = true
-    this.questRenderNudgeAt = GetTime() + .35
+    EV.minimapForceNext = true
+
+    -- Fallback only. Normal NEW/RELOAD/REMOVE processing calls
+    -- NotifyQuestNodesChanged() and schedules a ~10 ms render after mutation.
+    local fallback = GetTime() + .18
+    if not EV.questRenderNudgeAt or fallback < EV.questRenderNudgeAt then
+      EV.questRenderNudgeAt = fallback
+    end
     return
   end
 
@@ -1389,6 +1426,20 @@ driver:SetScript("OnUpdate", function()
 
   if EV.startupReadyAt and now < EV.startupReadyAt then return end
   if EV.startupReadyAt then EV.startupReadyAt = nil end
+
+  -- Quest node changes are rare and user-visible, so service their coalesced
+  -- render deadline before the 200 ms maintenance throttle. This adds only a
+  -- timestamp comparison to normal frames, while accepted quests can appear on
+  -- the minimap/world map on the next frame after SearchQuestID finishes.
+  if EV.questRenderNudgeAt and now >= EV.questRenderNudgeAt then
+    EV.questRenderNudgeAt = nil
+
+    if pfMap then
+      pfMap.queue_update = now
+      if pfMap.UpdateMinimap then pfMap:UpdateMinimap() end
+      if EV:IsWorldMapShown() and pfMap.UpdateNodes then pfMap:UpdateNodes() end
+    end
+  end
 
   if (this.tick or 0) > now then return end
   this.tick = now + .20
@@ -1442,19 +1493,6 @@ driver:SetScript("OnUpdate", function()
     else
       EV.renderPrimeAt = nil
       EV.renderPrimeUntil = nil
-    end
-  end
-
-  if this.questRenderNudgeAt and now >= this.questRenderNudgeAt then
-    this.questRenderNudgeAt = nil
-
-    if pfMap then
-      pfMap.queue_update = now
-      if pfMap.UpdateMinimap then pfMap:UpdateMinimap() end
-
-      if EV:IsWorldMapShown() and pfMap.UpdateNodes then
-        pfMap:UpdateNodes()
-      end
     end
   end
 

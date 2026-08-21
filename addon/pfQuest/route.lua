@@ -174,15 +174,58 @@ end
 local lastpos, completed = 0, 0
 local function sortfunc(a,b) return a[4] < b[4] end
 pfQuest.route:SetScript("OnUpdate", function()
+  -- Route math used to call GetPlayerMapPosition() on every rendered frame and
+  -- only throttle afterwards. On high-refresh clients that meant 120-240+
+  -- bridge calls per second even though route output itself was capped at 20 Hz.
+  -- Put the cap before the bridge call and do no player-position work at all
+  -- when there are no route nodes.
+  local now = GetTime()
+  if (this.qevNextUpdate or 0) > now then return end
+  this.qevNextUpdate = now + .05
+
+  if not this.coords[1] then
+    if this.qevHadRoute then
+      ClearPath(objectivepath)
+      ClearPath(playerpath)
+      ClearPath(mplayerpath)
+      if this.arrow and this.arrow.IsShown and this.arrow:IsShown() then
+        this.arrow:Hide()
+      end
+      this.qevHadRoute = nil
+    end
+    return
+  end
+  this.qevHadRoute = true
+
+  -- Do not calculate/repaint world-map route lines while the world map is
+  -- closed. The old code kept sorting route points and redrawing the
+  -- player-to-objective path during normal gameplay even though those textures
+  -- were invisible. Keep working only when a visible consumer needs it: the
+  -- world-map route, minimap route, or navigation arrow.
+  local worldMapShown = WorldMapFrame and WorldMapFrame.IsShown and WorldMapFrame:IsShown()
+  local worldRouteVisible = worldMapShown and pfQuest_config["routes"] ~= "0"
+  local minimapRouteVisible = pfQuest_config["routeminimap"] == "1"
+  local arrowVisible = pfQuest_config["arrow"] == "1"
+  if not worldRouteVisible and not minimapRouteVisible and not arrowVisible then
+    if not this.qevInactiveCleared then
+      ClearPath(objectivepath)
+      ClearPath(playerpath)
+      ClearPath(mplayerpath)
+      -- Force a fresh route draw if the world map is opened later.
+      this.firstnode = nil
+      this.qevInactiveCleared = true
+    end
+    return
+  end
+  this.qevInactiveCleared = nil
+
   local xplayer, yplayer = QuestieEV_SafeGetPlayerMapPosition("player")
   local wrongmap = xplayer == 0 and yplayer == 0 and true or nil
   local curpos = xplayer + yplayer
 
-  -- limit distance and route updates to once per .1 seconds
-  if ( this.tick or 5) > GetTime() and lastpos == curpos then return else this.tick = GetTime() + 1 end
-
-  -- limit to a maxium of each .05 seconds even on position change
-  if ( this.throttle or .2) > GetTime() then return else this.throttle = GetTime() + .05 end
+  -- Recalculate stationary routes at most once per second. Movement is already
+  -- capped above at 20 Hz, which is more than enough for route positioning.
+  if ( this.tick or 5) > now and lastpos == curpos then return else this.tick = now + 1 end
 
   -- save current position
   lastpos = curpos
@@ -196,7 +239,7 @@ pfQuest.route:SetScript("OnUpdate", function()
   end
 
   -- sort all coords by distance only once per second
-  if not this.recalculate or this.recalculate < GetTime() then
+  if not this.recalculate or this.recalculate < now then
     table.sort(this.coords, sortfunc)
 
     -- order list on custom targets
@@ -226,7 +269,7 @@ pfQuest.route:SetScript("OnUpdate", function()
       end
     end
 
-    this.recalculate = GetTime() + 1
+    this.recalculate = now + 1
   end
 
   -- show arrow when route exists and is stable
@@ -328,6 +371,13 @@ local defcolor = "|cffffcc00"
 local r, g, b
 
 pfQuest.route.arrow:SetScript("OnUpdate", function()
+  -- High-refresh displays do not need arrow texture/trigonometry at the full
+  -- render rate. Cap this visual-only work to roughly 60 Hz; on <=60 FPS
+  -- clients this does not reduce responsiveness at all.
+  local now = GetTime()
+  if (this.qevNextUpdate or 0) > now then return end
+  this.qevNextUpdate = now + .016
+
   -- abort if the frame is not initialized yet
   if not this.parent then return end
 

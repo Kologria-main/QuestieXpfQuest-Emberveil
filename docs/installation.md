@@ -2,13 +2,21 @@
 
 ## Recommended offline installer
 
-1. Download `Questie_Emberveil_v2.0.0-beta1.15.zip` from this repository's GitHub release.
+1. Download `Questie_Emberveil_v2.0.0-beta1.16.zip` from this repository's GitHub release.
 2. Extract the entire ZIP to a normal folder. Do not run the installer from inside the ZIP preview.
 3. Exit Emberveil completely.
 4. Double-click `INSTALL_QUESTIE_EMBERVEIL.cmd`.
 5. Restart Emberveil and enable `pfQuest` in the AddOns list if it is not already enabled.
 
-The installer contains readable PowerShell source and makes no network requests. It verifies the bundled payload against `installer/payload-manifest.sha256`, rejects executable files inside the addon, backs up an existing `pfQuest`, installs through a same-volume staging directory, verifies the installed copy, and restores the previous folder if anything fails.
+The installer contains readable PowerShell source and makes no network requests.
+
+### beta1.15 laptop crash recovery
+
+`2.0.0-beta1.16` also checks the detected Emberveil `WTF` directory for legacy `pfQuest_track` SavedVariables that contain runtime texture metadata. Those files can make Emberveil panic while parsing SavedVariables before the addon itself loads. The installer backs up affected files under `%LOCALAPPDATA%\QuestieEV\Backups` and removes only the unsafe tracking assignment when possible. Your normal pfQuest settings and quest history are preserved by the surgical repair.
+
+For an affected machine, **use the installer rather than manual file copy**, because replacing `Interface\AddOns\pfQuest` alone cannot repair an already-corrupted SavedVariables file.
+
+ It verifies the bundled payload against `installer/payload-manifest.sha256`, rejects executable files inside the addon, backs up an existing `pfQuest`, installs through a same-volume staging directory, verifies the installed copy, and restores the previous folder if anything fails.
 
 Backups and logs are stored outside the game folder:
 

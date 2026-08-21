@@ -388,8 +388,18 @@ function pfMap:GetMapNameByID(id)
 end
 
 function pfMap:GetMapIDByName(search)
+  if not search then return nil end
+
+  -- Zone names are immutable after the locale database is loaded. Cache the
+  -- reverse lookup so the Emberveil position/minimap driver does not rescan the
+  -- complete zone-name table several times per second while the player moves.
+  if validmaps[search] then
+    return validmaps[search]
+  end
+
   for id, name in pairs(pfDB["zones"]["loc"]) do
     if name == search then
+      validmaps[search] = id
       return id
     end
   end

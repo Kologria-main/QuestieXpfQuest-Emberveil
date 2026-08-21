@@ -163,19 +163,64 @@ for id, db in pairs(dbs) do
   pfDatabase.dbstring = pfDatabase.dbstring .. " |cffcccccc[|cffffffff" .. db .. "|cffcccccc:|cff33ffcc" .. ( pfDB[db][loc] and loc or "enUS" ) .. "|cffcccccc]"
 end
 
+-- Tracking persistence safety for Emberveil.
+--
+-- Azeroth serializes SavedVariables as Lua source. Persisting runtime texture
+-- paths inside pfQuest_track can produce an invalid saved Lua chunk on the
+-- next launch (for example "\tracking" contains the Lua escape "\t").
+-- Keep only logical query data in SavedVariables and reconstruct runtime
+-- metadata, including texture paths, after login.
+local function BuildTrackRuntimeMeta(list)
+  local normalized = alias[list] and alias[list] or list
+  return {
+    ["addon"] = "TRACK_"..string.upper(normalized),
+    ["icon"] = pfQuestConfig.path.."\\img\\tracking\\"..normalized,
+  }
+end
+
+local function ReadSavedTrackQuery(name, data)
+  if type(data) ~= "table" then
+    return { name = alias[name] and alias[name] or name }
+  end
+
+  -- beta1.15.1+ representation
+  if type(data.query) == "table" then
+    return data.query
+  end
+
+  -- Migrate the old pfQuest representation { query, meta } when it is still
+  -- parseable. The runtime metadata is intentionally discarded.
+  if type(data[1]) == "table" then
+    return data[1]
+  end
+
+  -- Defensive compatibility with a direct query table.
+  if data.name then
+    return data
+  end
+
+  return { name = alias[name] and alias[name] or name }
+end
+
 -- track all previous meta selections on login
 pfDatabase.tracking = CreateFrame("Frame", "pfDatabaseMetaTracking", UIParent)
 pfDatabase.tracking:RegisterEvent("PLAYER_ENTERING_WORLD")
 pfDatabase.tracking:SetScript("OnEvent", function()
-  -- break on empty config
   if not pfQuest_track then return end
 
-  -- enable all tracked
   for name, data in pairs(pfQuest_track) do
-    pfDatabase:SearchMetaRelation(data[1], data[2])
+    local query = ReadSavedTrackQuery(name, data)
+    local list = alias[name] and alias[name] or name
+    query.name = query.name or list
+
+    -- Rewrite in memory to the serialization-safe format immediately. The
+    -- next normal logout will persist only logical query data.
+    pfQuest_track[name] = { ["query"] = query }
+
+    local meta = BuildTrackRuntimeMeta(list)
+    pfDatabase:SearchMetaRelation(query, meta)
   end
 
-  -- remove events
   this:UnregisterAllEvents()
 end)
 
@@ -767,11 +812,7 @@ end
 function pfDatabase:TrackMeta(list, state)
   local list = alias[list] and alias[list] or list
   local identifier = "TRACK_"..string.upper(list)
-
-  local meta = {
-    ["addon"] = identifier,
-    ["icon"] = pfQuestConfig.path.."\\img\\tracking\\"..list,
-  }
+  local meta = BuildTrackRuntimeMeta(list)
 
   local query = {
     name = list
@@ -795,8 +836,9 @@ function pfDatabase:TrackMeta(list, state)
     end
   end
 
-  -- save and perform the actual meta tracking
-  pfQuest_track[list] = { query, meta }
+  -- Persist only serialization-safe logical data. Runtime texture paths and
+  -- metadata must never be written into SavedVariables on Emberveil.
+  pfQuest_track[list] = { ["query"] = query }
   local maps = pfDatabase:SearchMetaRelation(query, meta)
 
   -- remove invalid results
@@ -1429,13 +1471,10 @@ function pfDatabase:SearchQuest(quest, meta, partial)
 end
 
 function pfDatabase:QuestFilter(id, plevel, pclass, prace)
-  -- Emberveil correctness gate: local history cannot prove which quests were
-  -- completed before pfQuest was installed. Never guess that a starter is
-  -- available unless the server supplied an authoritative completion snapshot.
+  -- On Emberveil without a bulk completed-quest API, use pfQuest's classic
+  -- local-history filtering. Do not globally suppress live quest availability.
   if QuestieEV and QuestieEV.CanRenderAvailableQuests
-      and not QuestieEV:CanRenderAvailableQuests() then
-    return
-  end
+      and not QuestieEV:CanRenderAvailableQuests() then return end
 
   -- hide active quest
   if pfQuest.questlog[id] then return end
@@ -1490,8 +1529,8 @@ function pfDatabase:SearchQuests(meta, maps)
   local maps = maps or {}
   local meta = meta or {}
 
-  -- Fast fail-closed path, with QuestFilter retaining the same invariant as a
-  -- defense for any current or future direct callers.
+  -- Do not render while quest state is actively reconciling, but local history
+  -- is sufficient for classic pfQuest-style live availability.
   if QuestieEV and QuestieEV.CanRenderAvailableQuests
       and not QuestieEV:CanRenderAvailableQuests() then
     return maps
@@ -1570,6 +1609,9 @@ function pfDatabase:SearchQuests(meta, maps)
       end
     end
   end
+  if QuestieEV and QuestieEV.MarkMinimapNodeCacheDirty then
+    QuestieEV:MarkMinimapNodeCacheDirty("available-quest-rebuild")
+  end
   return maps
 end
 
@@ -1614,26 +1656,57 @@ end
 -- Try to guess the quest ID based on the questlog ID
 -- Returns possible quest IDs
 function pfDatabase:GetQuestIDs(qid)
-  if GetQuestLink then
-    local questLink = GetQuestLink(qid)
-      if questLink then
-      local _, _, id = strfind(questLink, "|c.*|Hquest:([%d]+):([-]?[%d]+)|h%[(.*)%]|h|r")
-      if id then return { [1] = tonumber(id) } end
+  local title, level, _, header = compat.GetQuestLogTitle(qid)
+  if header or not title then return end
+
+  -- First resolve by the currently visible title. Most quests are unique and
+  -- need no quest-log selection changes, tooltip links, or undocumented APIs.
+  local candidates = {}
+  for id, data in pairs(pfDB["quests"]["loc"]) do
+    if quests[id] and data.T == title then
+      table.insert(candidates, id)
     end
   end
 
-  local oldID = GetQuestLogSelection()
-  SelectQuestLogEntry(qid)
-  local text, objective = GetQuestLogQuestText()
-  local title, level, _, header = compat.GetQuestLogTitle(qid)
-  SelectQuestLogEntry(oldID)
+  if table.getn(candidates) == 0 then
+    -- Custom/renamed Emberveil quest: keep title identity but never attach a
+    -- different bundled quest's coordinates by fuzzy name.
+    return { title }
+  end
 
-  if header or not title then return end
-  local identifier = title .. ":" .. ( level or "") .. ":" .. ( objective or "") .. ":" .. ( text or "")
+  if table.getn(candidates) == 1 then
+    return { candidates[1] }
+  end
 
-  -- always make sure the quest-cache exists
+  -- Duplicate quest titles require description/objective disambiguation.
+  -- Emberveil officially documents GetQuestLogSelection(),
+  -- SelectQuestLogEntry(), and GetQuestLogQuestText(). Use only those APIs.
+  local oldID = 0
+  if type(GetQuestLogSelection) == "function" then
+    local ok, value = pcall(GetQuestLogSelection)
+    if ok then oldID = tonumber(value) or 0 end
+  end
+
+  if type(SelectQuestLogEntry) ~= "function"
+      or type(GetQuestLogQuestText) ~= "function" then
+    return { title }
+  end
+
+  local okSelect = pcall(SelectQuestLogEntry, qid)
+  if not okSelect then return { title } end
+
+  local okText, text, objective = pcall(GetQuestLogQuestText)
+
+  if oldID and oldID > 0 then
+    pcall(SelectQuestLogEntry, oldID)
+  end
+
+  if not okText then return { title } end
+
+  local identifier = title .. ":" .. (level or "") .. ":" ..
+    (objective or "") .. ":" .. (text or "")
+
   pfQuest_questcache = pfQuest_questcache or {}
-
   if pfQuest_questcache[identifier] and pfQuest_questcache[identifier][1] then
     return pfQuest_questcache[identifier]
   end
@@ -1643,73 +1716,48 @@ function pfDatabase:GetQuestIDs(qid)
   local _, class = UnitClass("player")
   local pclass = pfDatabase:GetBitByClass(class)
 
-  local best = 0
-  local results = {}
+  local best = -1
+  local bestIDs = {}
 
-  local tcount = 0
-  -- check if multiple quests share the same name
-  for id, data in pairs(pfDB["quests"]["loc"]) do
-    if quests[id] and data.T == title then tcount = tcount + 1 end
-  end
+  for _, id in pairs(candidates) do
+    local score = 1
 
-  -- No exact title exists in the bundled database. Do not fuzzy-map a custom
-  -- or renamed Emberveil quest to a different quest merely because its title
-  -- is similar; an unknown quest intentionally produces no automatic nodes.
-  if tcount == 0 and title then
-    if not pfDatabase.localized then return { title } end
-    pfQuest_questcache[identifier] = { title }
-    return pfQuest_questcache[identifier]
-  end
+    if quests[id]["lvl"] == level then score = score + 8 end
 
-  for id, data in pairs(pfDB["quests"]["loc"]) do
-    local score = 0
+    if quests[id]["race"]
+        and bit.band(quests[id]["race"], prace) == prace then
+      score = score + 8
+    end
 
-    if quests[id] and data.T and data.T == title then
-      -- low score for same name
-      score = 1
+    if quests[id]["class"]
+        and bit.band(quests[id]["class"], pclass) == pclass then
+      score = score + 8
+    end
 
-      -- check level and set score
-      if quests[id]["lvl"] == level then
-        score = score + 8
-      end
+    score = score + max(24 - lev(
+      pfDatabase:FormatQuestText(pfDB.quests.loc[id]["O"]),
+      objective or "", 24), 0)
 
-      -- check race and set score
-      if quests[id]["race"] and ( bit.band(quests[id]["race"], prace) == prace ) then
-        score = score + 8
-      end
+    score = score + max(24 - lev(
+      pfDatabase:FormatQuestText(pfDB.quests.loc[id]["D"]),
+      text or "", 24), 0)
 
-      -- check class and set score
-      if quests[id]["class"] and ( bit.band(quests[id]["class"], pclass) == pclass ) then
-        score = score + 8
-      end
-
-      -- if multiple quests share the same name, use levenshtein algorithm,
-      -- to compare quest text distances in order to estimate the best quest id
-      if tcount > 1 then
-        -- check objective and calculate score
-        score = score + max(24 - lev(pfDatabase:FormatQuestText(pfDB.quests.loc[id]["O"]), objective, 24),0)
-
-        -- check description and calculate score
-        score = score + max(24 - lev(pfDatabase:FormatQuestText(pfDB.quests.loc[id]["D"]), text, 24),0)
-      end
-
-      if score > best then best = score end
-      results[score] = results[score] or {}
-      if score > 0 then table.insert(results[score], id) end
+    if score > best then
+      best = score
+      bestIDs = { id }
+    elseif score == best then
+      table.insert(bestIDs, id)
     end
   end
 
-  -- A tied best score is ambiguous. Upstream selected the first table entry,
-  -- whose order can vary and can attach another quest's objectives/history to
-  -- the player. Fail closed until the title/text/level resolve one candidate.
-  if not results[best] or table.getn(results[best]) ~= 1 then
+  -- Never attach a random quest on a tie.
+  if table.getn(bestIDs) ~= 1 then
     pfQuest_questcache[identifier] = { title }
     return pfQuest_questcache[identifier]
   end
 
-  -- cache for next time
-  pfQuest_questcache[identifier] = results[best]
-  return results[best]
+  pfQuest_questcache[identifier] = { bestIDs[1] }
+  return pfQuest_questcache[identifier]
 end
 
 -- browser search related defaults and values

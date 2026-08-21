@@ -25,7 +25,7 @@ https://github.com/Kologria-main/QuestieXpfQuest-Emberveil
 **Download**
 
 ```text
-https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases/download/v2.0.0-beta1.15/Questie_Emberveil_v2.0.0-beta1.15.zip
+https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases/download/v2.0.0-beta1.16/Questie_Emberveil_v2.0.0-beta1.16.zip
 ```
 
 **Short description**
@@ -49,7 +49,7 @@ Current limitation: party/raid interior minimap pins and the route arrow are dis
 **Version**
 
 ```text
-2.0.0-beta1.15
+2.0.0-beta1.16
 ```
 
 Upload `assets/icon.png` as the icon. Do not upload fabricated in-game screenshots; screenshots should show the real addon running in Emberveil and are optional under the announced rules.

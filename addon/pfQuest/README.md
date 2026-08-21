@@ -1,7 +1,7 @@
 # pfQuest
 
 > **Emberveil port notice:** This source tree is packaged as Questie Emberveil
-> `2.0.0-beta1.15`. Use the port's current installation and support information
+> `2.0.0-beta1.18`. Use the port's current installation and support information
 > at <https://github.com/Kologria-main/QuestieXpfQuest-Emberveil>. The original
 > pfQuest documentation and credits are retained below for attribution; its
 > upstream downloads are not Emberveil-compatible releases.

@@ -5,7 +5,7 @@ import luaparse from "luaparse";
 
 const repo = path.resolve(import.meta.dirname, "..");
 const addon = path.join(repo, "addon", "pfQuest");
-const expectedVersion = "2.0.0-beta1.15";
+const expectedVersion = "2.0.0-beta1.18";
 const failures = [];
 let parsedLua = 0;
 let totalFiles = 0;
@@ -137,11 +137,14 @@ const contracts = [
   [compat.includes(`return self:GetQuestLogEntryState(qlogid) == "complete"`), "canonical completion gate missing"],
   [compat.includes(`self.questHistoryAuthoritative = true`), "authoritative completed-history state missing"],
   [compat.includes(`function EV:RecordQuestRemoval`), "quest-removal reconciliation missing"],
+  [compat.includes(`return self.questStateReady == true`), "local-history availability gate still blocks live quest rendering"],
+  [compat.includes(`self.availableQuestMode = "local-best-effort"`), "local best-effort availability mode missing"],
   [database.includes(`not QuestieEV:CanRenderAvailableQuests()`), "available quests are not completion-gated"],
   [database.includes(`objectiveType == "gobject"`), "Emberveil game-object objective handling missing"],
   [database.includes(`renderEnder = false`), "premature active-quest ender markers are not gated"],
-  [database.includes(`table.getn(results[best]) ~= 1`), "ambiguous quest-ID resolver is not fail-closed"],
+  [database.includes(`table.getn(bestIDs) ~= 1`), "ambiguous quest-ID resolver is not fail-closed"],
   [!database.includes(`ttitle = data.T`), "active quest resolver still fuzzy-maps unknown titles"],
+  [!database.includes(`GetQuestLink(`), "active quest resolver still depends on GetQuestLink"],
   [quest.includes(`"REMOVE", data.state`), "quest removal omits previous canonical state"],
   [quest.includes(`local HookGetQuestReward = GetQuestReward`), "fast quest-turn-in capture missing"],
   [quest.includes(`state = state .. "|state=" .. evState`), "quest fingerprint omits three-state status"],

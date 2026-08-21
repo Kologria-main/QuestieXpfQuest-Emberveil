@@ -1,9 +1,9 @@
 -- Questie Emberveil / pfQuest engine
--- Early compatibility layer v2.0.0-beta1.15
+-- Early compatibility layer v2.0.0-beta1.18
 
 QuestieEV = QuestieEV or {}
 local EV = QuestieEV
-EV.version = "2.0.0-beta1.15"
+EV.version = "2.0.0-beta1.18"
 EV.engine = "pfQuest"
 EV.sourceCommit = "104f35678ca39ab1fb78b655f815cc7016f5e0c8"
 
@@ -62,10 +62,13 @@ EV.questSyncSource = "pending"
 EV.questSyncCount = 0
 EV.questSyncDeadline = nil
 EV.questSyncAt = nil
--- Available quest starters are safe to render only when the server has
--- supplied a complete character-wide completion snapshot. Local pfQuest
--- history cannot know about quests completed before the addon was installed.
+-- Emberveil does not currently expose a documented bulk completed-quest API.
+-- Keep this flag for diagnostics: when false, available quest markers use
+-- pfQuest's classic local-history model. That can include a previously
+-- completed pre-install quest, but must NOT disable all live quest-giver
+-- markers for the entire character.
 EV.questHistoryAuthoritative = false
+EV.availableQuestMode = "pending"
 EV.sessionConfirmedCompletions = EV.sessionConfirmedCompletions or {}
 
 local function chat(msg)
@@ -313,8 +316,32 @@ local function CompletedSnapshotToHistory(snapshot)
 end
 
 function EV:CanRenderAvailableQuests()
+  -- Live availability must continue to work even when Emberveil lacks a
+  -- character-wide completed-quest API. questStateReady means active/local
+  -- quest state has been reconciled. questHistoryAuthoritative is diagnostic
+  -- quality metadata, not a render kill-switch.
   return self.questStateReady == true
-    and self.questHistoryAuthoritative == true
+end
+
+function EV:GetQuestLogCounts()
+  local entries = 0
+  if type(GetNumQuestLogEntries) == "function" then
+    local ok, value = pcall(GetNumQuestLogEntries)
+    if ok then entries = tonumber(value) or 0 end
+  end
+
+  if entries < 0 then entries = 0 end
+
+  local quests = 0
+  if pfQuestCompat and type(pfQuestCompat.GetQuestLogTitle) == "function" then
+    for index = 1, entries do
+      local ok, title, _, _, header =
+        pcall(pfQuestCompat.GetQuestLogTitle, index)
+      if ok and title and not header then quests = quests + 1 end
+    end
+  end
+
+  return entries, quests
 end
 
 function EV:RebuildAuthoritativeQuestState(reason)
@@ -379,6 +406,7 @@ function EV:AcceptCompletedQuestSnapshot(snapshot, source)
   self.questSyncDone = true
   self.questStateReady = true
   self.questHistoryAuthoritative = true
+  self.availableQuestMode = "authoritative"
   self.questSyncDeadline = nil
   self.questSyncAt = nil
 
@@ -402,15 +430,15 @@ function EV:UseLocalQuestHistory(reason)
   self.questSyncDone = true
   self.questStateReady = true
   self.questHistoryAuthoritative = false
+  self.availableQuestMode = "local-best-effort"
   self.questSyncDeadline = nil
   self.questSyncAt = nil
 
   self:RebuildAuthoritativeQuestState(self.questSyncSource)
 
   if self.Chat then
-    self.Chat("server completion snapshot unavailable; using local quest history (" ..
-      tostring(self.questSyncCount) .. " recorded). Available quest-giver markers " ..
-      "are hidden to avoid showing quests that may already be complete.")
+    self.Chat("server completion snapshot unavailable; using classic local quest history (" ..
+      tostring(self.questSyncCount) .. " recorded). Live quest-giver markers remain enabled.")
   end
 end
 
@@ -469,8 +497,16 @@ function EV:RequestQuestStateSync(force)
     return
   end
 
+  local getter = _G and _G["GetQuestsCompleted"] or nil
+  local query = _G and _G["QueryQuestsCompleted"] or nil
+  if type(getter) ~= "function" and type(query) ~= "function" then
+    self:UseLocalQuestHistory("local-history-no-server-api")
+    return
+  end
+
   self.questStateReady = false
   self.questHistoryAuthoritative = false
+  self.availableQuestMode = "sync-pending"
   self.questSyncPending = true
   self.questSyncWaiting = false
   self.questSyncAt = GetTime() + .75

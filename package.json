@@ -1,7 +1,7 @@
 {
   "name": "questie-emberveil-release-tools",
   "private": true,
-  "version": "2.0.0-beta1.15",
+  "version": "2.0.0-beta1.18",
   "description": "Offline validation tools for the Questie Emberveil addon release.",
   "packageManager": "pnpm@11.19.0",
   "scripts": {

@@ -92,6 +92,14 @@ tracker:SetScript("OnMouseUp",function()
 end)
 
 tracker:SetScript("OnUpdate", function()
+  -- The tracker used to run one OnUpdate for the container plus one for every
+  -- visible quest row at the full render rate. Centralize those lightweight
+  -- visual checks here at ~30 Hz so a 144/240 Hz display does not multiply Lua
+  -- callback overhead without improving tracker responsiveness.
+  local now = GetTime()
+  if (this.qevNextUpdate or 0) > now then return end
+  this.qevNextUpdate = now + .033
+
   if WorldMapFrame:IsShown() then
     if this.strata ~= "FULLSCREEN_DIALOG" then
       this:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -113,6 +121,12 @@ tracker:SetScript("OnUpdate", function()
 
   if pfQuestCompat.QuestWatchFrame:IsShown() then
     pfQuestCompat.QuestWatchFrame:Hide()
+  end
+
+  for _, button in pairs(tracker.buttons or {}) do
+    if button and not button.empty and button.IsShown and button:IsShown() then
+      tracker.ButtonUpdate(button)
+    end
   end
 end)
 
@@ -227,25 +241,26 @@ function tracker.ButtonLeave()
   HideTooltip()
 end
 
-function tracker.ButtonUpdate()
+function tracker.ButtonUpdate(self)
+  self = self or this
   local alpha = tonumber((pfQuest_config["trackeralpha"] or .2)) or .2
 
-  if not this.alpha or this.alpha ~= alpha then
-    this.bg:SetTexture(0,0,0,alpha)
-    this.bg:SetAlpha(alpha)
-    this.alpha = alpha
+  if not self.alpha or self.alpha ~= alpha then
+    self.bg:SetTexture(0,0,0,alpha)
+    self.bg:SetAlpha(alpha)
+    self.alpha = alpha
   end
 
-  if pfMap.highlight and pfMap.highlight == this.title then
-    if not this.highlight then
-      this.bg:SetTexture(1,1,1,math.max(.2, alpha))
-      this.bg:SetAlpha(math.max(.5, alpha))
-      this.highlight = true
+  if pfMap.highlight and pfMap.highlight == self.title then
+    if not self.highlight then
+      self.bg:SetTexture(1,1,1,math.max(.2, alpha))
+      self.bg:SetAlpha(math.max(.5, alpha))
+      self.highlight = true
     end
-  elseif this.highlight then
-    this.bg:SetTexture(0,0,0,alpha)
-    this.bg:SetAlpha(alpha)
-    this.highlight = nil
+  elseif self.highlight then
+    self.bg:SetTexture(0,0,0,alpha)
+    self.bg:SetAlpha(alpha)
+    self.highlight = nil
   end
 end
 
@@ -595,7 +610,6 @@ function tracker.ButtonAdd(title, node)
 
     tracker.buttons[id]:SetScript("OnEnter", tracker.ButtonEnter)
     tracker.buttons[id]:SetScript("OnLeave", tracker.ButtonLeave)
-    tracker.buttons[id]:SetScript("OnUpdate", tracker.ButtonUpdate)
     tracker.buttons[id]:SetScript("OnEvent", tracker.ButtonEvent)
     tracker.buttons[id]:SetScript("OnClick", tracker.ButtonClick)
   end
@@ -622,11 +636,16 @@ function tracker.Reset()
   end
 
   -- add tracked quests
-  local _, numQuests = GetNumQuestLogEntries()
-  local found = 0
+  local numEntries = 0
+  if QuestieEV and QuestieEV.GetQuestLogCounts then
+    numEntries = QuestieEV:GetQuestLogCounts()
+  elseif type(GetNumQuestLogEntries) == "function" then
+    numEntries = tonumber(GetNumQuestLogEntries()) or 0
+  end
+  if numEntries < 0 then numEntries = 0 end
 
-  -- iterate over all quests
-  for qlogid=1,40 do
+  -- iterate over all visible quest-log rows
+  for qlogid=1,numEntries do
     local title, level, tag, header, collapsed, complete = compat.GetQuestLogTitle(qlogid)
     if title and not header then
       local watched = IsQuestWatched(qlogid)
@@ -639,10 +658,6 @@ function tracker.Reset()
         pfQuest.tracker.ButtonAdd(title, { dummy = true, addon = "PFQUEST", texture = img })
       end
 
-      found = found + 1
-      if found >= numQuests then
-        break
-      end
     end
   end
 end

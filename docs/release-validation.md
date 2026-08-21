@@ -1,4 +1,4 @@
-# Release validation: 2.0.0-beta1.15
+# Release validation: 2.0.0-beta1.16
 
 Validation date: 2026-08-21
 
@@ -6,7 +6,7 @@ Target: Emberveil live client, Windows, character with six active quests and eig
 
 ## Release result
 
-`2.0.0-beta1.15` passed the repository's automated source, quest-state, package,
+`2.0.0-beta1.16` passed the repository's automated source, quest-state, package,
 installer, and deterministic-build gates. The exact packaged addon was then
 installed into the live Emberveil client and exercised without changing quest or
 character state.

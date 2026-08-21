@@ -1,16 +1,18 @@
-# Questie Emberveil
+﻿# Questie Emberveil
+
+> **Installer hotfix (2026-08-21):** the first beta1.16 package contained a PowerShell parse error in the new SavedVariables priority scanner. This corrected package keeps the beta1.16 addon payload unchanged, repairs the installer, and makes the launcher run PowerShell's own AST parser before installation.
+
 
 Quest and objective markers for the Emberveil client, built from the proven [pfQuest](https://github.com/shagu/pfQuest) engine and adapted for Emberveil's Unreal-backed UI and Vanilla-style Lua API.
 
-Current release: **2.0.0-beta1.15**
+Current release: **2.0.0-beta1.18**
 
 > This is a community beta, not an official Emberveil addon. It is deliberately conservative: if the client cannot prove that a coordinate or quest state is valid, the addon hides the affected marker instead of showing a potentially wrong one.
 
 ## What it provides
 
 - Active quest objectives on the world map and minimap.
-- Quest-turn-in markers only after official quest-level completion, plus available quest-giver markers when Emberveil can
-  provide authoritative character-wide completion history.
+- Quest-turn-in markers only after official quest-level completion, plus live available quest-giver markers using authoritative history when available and local best-effort history otherwise.
 - A searchable pfQuest database and tracker.
 - Correct three-state quest handling: complete, failed, or incomplete.
 - Indoor parent-zone continuity without mutating the native minimap.
@@ -41,10 +43,7 @@ Restart Emberveil completely after installing. See [Installation](docs/installat
 - The installer is readable PowerShell source, uses no network access, and installs only the bundled payload.
 - Native UI child/region enumeration, tooltip hyperlink bridge calls, forced client termination, native minimap zoom mutation, and undocumented profiling calls are prohibited by automated validation.
 - Party and raid interior minimap pins are hidden because the supplied API has no reliable floor-aware coordinate surface.
-- If Emberveil does not expose a character-wide completed-quest API, automatic
-  available quest-giver markers are hidden. Active objectives and turn-ins
-  remain visible; the addon will not guess and show a quest already completed
-  before installation.
+- If Emberveil does not expose a character-wide completed-quest API, available quest-giver markers use pfQuest's local history as a best-effort fallback. Diagnostics report that state as non-authoritative instead of disabling live quest availability.
 - The route arrow is disabled because Emberveil does not currently expose a safe player-facing value.
 
 ## Commands

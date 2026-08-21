@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$InstallHint,
     [switch]$NonInteractive,
@@ -9,7 +9,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Version = '2.0.0-beta1.15'
+$Version = '2.0.0-beta1.18'
 $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $SourceRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseRoot 'addon\pfQuest'))
 $ManifestPath = Join-Path $PSScriptRoot 'payload-manifest.sha256'
@@ -21,6 +21,7 @@ $StateRoot = [System.IO.Path]::GetFullPath($StateRoot)
 $LogRoot = Join-Path $StateRoot 'Logs'
 $BackupRoot = Join-Path $StateRoot 'Backups'
 New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
 $LogPath = Join-Path $LogRoot ("install-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 
 function Write-InstallLog {
@@ -93,6 +94,292 @@ function Find-AddOnsPaths {
     }
     foreach ($candidate in $known) { Add-Candidate $result $seen $candidate }
     return $result
+}
+
+function Get-UniqueExistingDirectory {
+    param(
+        [AllowEmptyCollection()][System.Collections.Generic.List[string]]$List,
+        [AllowEmptyCollection()][hashtable]$Seen,
+        [string]$Path
+    )
+
+    if ($null -eq $List -or $null -eq $Seen) {
+        throw 'Internal SavedVariables scanner state was not initialized.'
+    }
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    try {
+        if (Test-Path -LiteralPath $Path -PathType Container) {
+            $full = Get-NormalizedPath $Path
+            $key = $full.ToLowerInvariant()
+            if (-not $Seen.ContainsKey($key)) {
+                $Seen[$key] = $true
+                $List.Add($full)
+            }
+        }
+    } catch {}
+}
+
+function Get-SavedVariablesSearchRoots {
+    param([Parameter(Mandatory = $true)][string]$AddOnsPath)
+
+    $roots = New-Object 'System.Collections.Generic.List[string]'
+    $seen = @{}
+
+    # 1) Walk the Emberveil install ancestry. This covers both classic-style
+    # WTF layouts and any server/launcher-owned data directories placed next
+    # to live/Azeroth.
+    $current = Get-NormalizedPath $AddOnsPath
+    for ($i = 0; $i -lt 10 -and $current; $i++) {
+        Get-UniqueExistingDirectory -List $roots -Seen $seen -Path $current
+        Get-UniqueExistingDirectory -List $roots -Seen $seen -Path (Join-Path $current 'WTF')
+        Get-UniqueExistingDirectory -List $roots -Seen $seen -Path (Join-Path $current 'Saved')
+        Get-UniqueExistingDirectory -List $roots -Seen $seen -Path (Join-Path $current 'SavedVariables')
+
+        $parent = [System.IO.Path]::GetDirectoryName($current)
+        if (-not $parent -or $parent -eq $current) { break }
+        $current = $parent
+    }
+
+    # 2) Unreal/launcher user-data locations. Emberveil is not required to use
+    # Blizzard's classic WTF placement, so search the normal Windows data roots
+    # where Unreal projects and launchers persist user state.
+    $candidates = @(
+        # Confirmed Emberveil layout:
+        # %LOCALAPPDATA%\Azeroth\Saved\Account\<ACCOUNT>\SavedVariables
+        (Join-Path $env:LOCALAPPDATA 'Azeroth\Saved\Account'),
+        (Join-Path $env:LOCALAPPDATA 'Azeroth\Saved'),
+        $env:APPDATA,
+        (Join-Path $env:USERPROFILE 'Saved Games'),
+        (Join-Path $env:USERPROFILE 'Documents'),
+        # Expensive fallback last.
+        $env:LOCALAPPDATA
+    )
+
+    foreach ($candidate in $candidates) {
+        Get-UniqueExistingDirectory -List $roots -Seen $seen -Path $candidate
+    }
+
+    return $roots
+}
+
+function Remove-TopLevelLuaAssignment {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$Variable
+    )
+
+    # WoW SavedVariables are serialized as a sequence of column-zero top-level
+    # assignments. We intentionally do NOT parse the malformed table. Instead
+    # remove from the target assignment through the next top-level assignment.
+    $startRegex = [regex]("(?m)^" + [regex]::Escape($Variable) + "[ `t]*=")
+    $start = $startRegex.Match($Text)
+    if (-not $start.Success) {
+        return [pscustomobject]@{ Changed = $false; Text = $Text }
+    }
+
+    $nextRegex = [regex]'(?m)^[A-Za-z_][A-Za-z0-9_]*[ `t]*='
+    $next = $nextRegex.Match($Text, $start.Index + $start.Length)
+    $end = if ($next.Success) { $next.Index } else { $Text.Length }
+
+    $cleaned = $Text.Remove($start.Index, $end - $start.Index)
+    return [pscustomobject]@{ Changed = $true; Text = $cleaned }
+}
+
+function Test-PfQuestSavedVariableCandidate {
+    param([Parameter(Mandatory = $true)][System.IO.FileInfo]$File)
+
+    try {
+        if ($File.Length -gt 16777216) { return $false }
+
+        $bytes = [System.IO.File]::ReadAllBytes($File.FullName)
+        $encoding = [System.Text.Encoding]::GetEncoding(28591)
+        $text = $encoding.GetString($bytes)
+
+        return (
+            $text -match '(?m)^pfQuest_config[ `t]*=' -or
+            $text -match '(?m)^pfQuest_track[ `t]*=' -or
+            $text -match '(?is)Interface.{0,80}AddOns.{0,80}pfQuest.{0,80}img.{0,80}tracking'
+        )
+    } catch {
+        return $false
+    }
+}
+
+function Find-PfQuestSavedVariableFiles {
+    param([Parameter(Mandatory = $true)][string]$AddOnsPath)
+
+    $roots = @(Get-SavedVariablesSearchRoots -AddOnsPath $AddOnsPath)
+    $files = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
+    $seenFiles = @{}
+    $excludedBackupRoot = (Get-NormalizedPath $BackupRoot).ToLowerInvariant()
+
+    Write-InstallLog ("SavedVariables search roots: " + $roots.Count) DarkGray
+
+    # Fastest path for the confirmed Emberveil account layout.
+    $accountRoot = Join-Path $env:LOCALAPPDATA 'Azeroth\Saved\Account'
+    if (Test-Path -LiteralPath $accountRoot -PathType Container) {
+        # Keep this deliberately simple for Windows PowerShell 5.1. The beta1.16
+        # package accidentally closed this foreach with `})`, which made the
+        # entire installer fail at parse time before any installation work ran.
+        $accountDirs = @(Get-ChildItem -LiteralPath $accountRoot -Directory -ErrorAction SilentlyContinue)
+        foreach ($accountDir in $accountDirs) {
+            $savedDir = Join-Path $accountDir.FullName 'SavedVariables'
+            if (-not (Test-Path -LiteralPath $savedDir -PathType Container)) { continue }
+
+            Write-InstallLog ("  priority scan: " + $savedDir) DarkGray
+            foreach ($name in @('pfQuest.lua', 'pfQuest.lua.bak')) {
+                $candidate = Join-Path $savedDir $name
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    $file = Get-Item -LiteralPath $candidate
+                    $full = Get-NormalizedPath $file.FullName
+                    $key = $full.ToLowerInvariant()
+                    if (-not $seenFiles.ContainsKey($key) -and
+                        (Test-PfQuestSavedVariableCandidate -File $file)) {
+                        $seenFiles[$key] = $true
+                        $files.Add($file)
+                    }
+                }
+            }
+        }
+    }
+
+    if ($files.Count -gt 0) { return $files }
+
+    foreach ($root in $roots) {
+        Write-InstallLog ("  scanning: " + $root) DarkGray
+
+        # Fast pass: exact pfQuest SavedVariables filenames.
+        $named = @()
+        try {
+            $named = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+                $_.Name -ieq 'pfQuest.lua' -or
+                $_.Name -ieq 'pfQuest.lua.bak'
+            })
+        } catch {}
+
+        foreach ($file in $named) {
+            $full = Get-NormalizedPath $file.FullName
+            if ($full.ToLowerInvariant().StartsWith($excludedBackupRoot)) { continue }
+            $key = $full.ToLowerInvariant()
+            if (-not $seenFiles.ContainsKey($key) -and (Test-PfQuestSavedVariableCandidate -File $file)) {
+                $seenFiles[$key] = $true
+                $files.Add($file)
+            }
+        }
+    }
+
+    if ($files.Count -gt 0) { return $files }
+
+    # Fallback pass: some Unreal-era clients may store addon SavedVariables in
+    # a differently named .lua file. Limit this content scan to directories
+    # whose path strongly indicates persisted addon/user state.
+    foreach ($root in $roots) {
+        $luaFiles = @()
+        try {
+            $luaFiles = @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.lua' -ErrorAction SilentlyContinue | Where-Object {
+                $_.FullName -match '(?i)SavedVariables|\\WTF\\|\\Saved\\|Azeroth|Emberveil'
+            })
+        } catch {}
+
+        foreach ($file in $luaFiles) {
+            $full = Get-NormalizedPath $file.FullName
+            if ($full.ToLowerInvariant().StartsWith($excludedBackupRoot)) { continue }
+            $key = $full.ToLowerInvariant()
+            if (-not $seenFiles.ContainsKey($key) -and (Test-PfQuestSavedVariableCandidate -File $file)) {
+                $seenFiles[$key] = $true
+                $files.Add($file)
+            }
+        }
+    }
+
+    return $files
+}
+
+function Repair-PfQuestSavedVariables {
+    param([Parameter(Mandatory = $true)][string]$AddOnsPath)
+
+    $files = @(Find-PfQuestSavedVariableFiles -AddOnsPath $AddOnsPath)
+
+    if ($files.Count -eq 0) {
+        Write-InstallLog 'WARNING: No pfQuest SavedVariables file was found to inspect.' Yellow
+        Write-InstallLog 'If this machine previously crashed with the beta1.15 tracking-path LUA PANIC, recovery was NOT performed.' Yellow
+        Write-InstallLog 'A diagnostic file will be written so the SavedVariables location can be identified.' Yellow
+
+        $diag = Join-Path $LogRoot ("savedvars-search-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
+        $roots = @(Get-SavedVariablesSearchRoots -AddOnsPath $AddOnsPath)
+        @(
+            'Questie Emberveil SavedVariables search diagnostic'
+            ('Time: ' + (Get-Date).ToString('s'))
+            ('AddOns: ' + $AddOnsPath)
+            ''
+            'Search roots:'
+        ) | Set-Content -LiteralPath $diag -Encoding UTF8
+        $roots | Add-Content -LiteralPath $diag -Encoding UTF8
+
+        Write-InstallLog ("SavedVariables diagnostic: " + $diag) Cyan
+        return [pscustomobject]@{
+            Found = 0
+            Repaired = 0
+            Quarantined = 0
+            Diagnostic = $diag
+        }
+    }
+
+    $byteEncoding = [System.Text.Encoding]::GetEncoding(28591)
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $backup = Join-Path $BackupRoot ("SavedVariables-{0}-{1}" -f $stamp, ([guid]::NewGuid().ToString('N')))
+    New-Item -ItemType Directory -Path $backup -Force | Out-Null
+
+    $repaired = 0
+    $quarantined = 0
+    $index = 0
+
+    foreach ($file in $files) {
+        $index++
+        $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+        $text = $byteEncoding.GetString($bytes)
+
+        $hasTrackAssignment = $text -match '(?m)^pfQuest_track[ `t]*='
+        $hasUnsafeTrackingPath = $text -match '(?is)Interface.{0,80}AddOns.{0,80}pfQuest.{0,80}img.{0,80}tracking'
+
+        Write-InstallLog ("Found pfQuest SavedVariables: " + $file.FullName) Cyan
+
+        $backupFile = Join-Path $backup ("{0:D3}-{1}" -f $index, $file.Name)
+        Copy-Item -LiteralPath $file.FullName -Destination $backupFile -Force
+        Add-Content -LiteralPath (Join-Path $backup 'SOURCE_PATHS.txt') `
+            -Value ("{0}`t{1}" -f [System.IO.Path]::GetFileName($backupFile), $file.FullName) -Encoding UTF8
+
+        if ($hasTrackAssignment) {
+            $result = Remove-TopLevelLuaAssignment -Text $text -Variable 'pfQuest_track'
+            if ($result.Changed) {
+                [System.IO.File]::WriteAllBytes($file.FullName, $byteEncoding.GetBytes($result.Text))
+                $repaired++
+                Write-InstallLog ("Repaired pfQuest_track in: " + $file.FullName) Green
+                continue
+            }
+        }
+
+        if ($hasUnsafeTrackingPath) {
+            # We found the exact beta1.15 crash signature but cannot isolate the
+            # assignment. Preserve the original backup and remove this persisted
+            # file so Emberveil can start and regenerate safe state.
+            Remove-Item -LiteralPath $file.FullName -Force
+            $quarantined++
+            Write-InstallLog ("Quarantined malformed pfQuest SavedVariables: " + $file.FullName) Yellow
+        } else {
+            Write-InstallLog ("No unsafe pfQuest_track state found in: " + $file.FullName) DarkGray
+        }
+    }
+
+    Write-InstallLog ("SavedVariables backup: " + $backup) Cyan
+    Write-InstallLog ("SavedVariables recovery: found=$($files.Count) repaired=$repaired quarantined=$quarantined") Green
+
+    return [pscustomobject]@{
+        Found = $files.Count
+        Repaired = $repaired
+        Quarantined = $quarantined
+        Diagnostic = $null
+    }
 }
 
 function Read-PayloadManifest {
@@ -201,6 +488,11 @@ try {
     if ($target -ieq $SourceRoot) { throw 'Source and installation target resolve to the same path.' }
 
     Write-InstallLog "Target: $target" Cyan
+    Write-InstallLog 'Checking pfQuest SavedVariables for the beta1.15 tracking-path serialization crash...' Cyan
+    $savedVarRecovery = Repair-PfQuestSavedVariables -AddOnsPath $addOns
+    if ($savedVarRecovery.Found -eq 0) {
+        Write-InstallLog 'NOTE: Addon installation will continue, but no legacy SavedVariables file was located.' Yellow
+    }
     $token = [guid]::NewGuid().ToString('N')
     $stageRoot = Join-Path $addOns ".qev-stage-$token"
     $stageTarget = Join-Path $stageRoot 'pfQuest'

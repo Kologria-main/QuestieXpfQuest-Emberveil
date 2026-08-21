@@ -1,5 +1,68 @@
 # Changelog
 
+## 2.0.0-beta1.18 — 2026-08-22
+
+- Move the route 50 ms throttle ahead of the player-map-position bridge call, preventing high-refresh clients from invoking that bridge at render-frame frequency.
+- Suspend route computation when no route nodes exist and when no route consumer is visible/enabled.
+- Stop continuously drawing invisible world-map route lines while the world map is closed.
+- Cap navigation-arrow visual math to about 60 Hz.
+- Consolidate tracker row visual polling into one ~30 Hz tracker update instead of one full-rate callback per visible row.
+- Cache successful localized zone-name to map-ID lookups.
+- Unify the beta1.17 quest render-nudge deadline on `QuestieEV`, preserving true event/node coalescing and the intended near-immediate render path.
+- Preserve existing minimap spatial filtering, FPS-adaptive cadence, transition backoff, world-map throttling, and beta1.17 quest behavior.
+
+## 2.0.0-beta1.17 — 2026-08-22
+
+- Makes accepted-quest objective markers render on the minimap/world map immediately after pfQuest finishes the NEW quest node transaction.
+- Fixes a stale minimap spatial-cache race where QUEST_LOG_UPDATE could rebuild the cache before SearchQuestID inserted the new objective nodes.
+- Removes the expensive full available-quest scan from the normal quest-accept path.
+- Defers reward/abandon availability reconciliation by 650 ms so visible quest-state transitions render first.
+- Services quest render nudges before the 200 ms map-maintenance throttle while retaining the adaptive FPS limiter and spatial minimap filtering.
+
+
+## 2.0.0-beta1.16 — 2026-08-21
+
+### Live quest/map correctness
+- Fix newly available quest-giver markers being permanently hidden whenever Emberveil lacks a bulk completed-quest history API. Local pfQuest history now powers classic best-effort live availability instead of acting as a global render kill-switch.
+- Fix live quest-log scanning to use Emberveil's documented first `GetNumQuestLogEntries()` return (visible row count), removing the old two-return Vanilla assumption and fixed 40-row scan.
+- Apply the same quest-log row-count fix to the tracker.
+- Rework active quest ID resolution to avoid undocumented `GetQuestLink()`. Unique titles resolve without changing quest-log selection; duplicate titles use the documented `GetQuestLogSelection`, `SelectQuestLogEntry`, and `GetQuestLogQuestText` path only.
+- Quest events now directly invalidate minimap/world-map render caches so newly accepted/updated quests are consumed without opening the world map.
+- Available quest-giver rescans are limited to quest accept/remove, player level/skill/world changes rather than every objective-progress tick.
+
+### Map/minimap/indoor behavior
+- Preserve the beta1.14+ parent-zone continuity model for houses, inns, caves, castles, and other subzones.
+- Preserve event-driven indoor/outdoor minimap scale selection: `ZONE_CHANGED_INDOORS` changes environment, manual zoom only reprojects pins.
+- Preserve spatial minimap node indexing and FPS-aware throttling.
+
+### Installer
+- Add the confirmed Emberveil SavedVariables layout `%LOCALAPPDATA%\Azeroth\Saved\Account\<ACCOUNT>\SavedVariables` as the priority recovery path before broad Windows user-data fallback scanning.
+
+## 2.0.0-beta1.15.3 — 2026-08-21
+
+- Fix Windows PowerShell 5.1 rejecting the SavedVariables scanner's initially empty `List[string]` accumulator.
+- Add `AllowEmptyCollection()` to internal scanner collection parameters and an explicit null-state guard.
+- Keep the beta1.15.2 broad SavedVariables discovery/recovery behavior unchanged.
+- Installer still aborts transactionally if recovery code throws before installation.
+
+## 2.0.0-beta1.15.2 — 2026-08-21
+
+- Fix the beta1.15.1 recovery installer failing to find SavedVariables on the affected laptop because it assumed a nearby classic `WTF` directory.
+- Search the Emberveil install ancestry plus `%LOCALAPPDATA%`, `%APPDATA%`, `Saved Games`, and `Documents` for pfQuest SavedVariables.
+- Add a filename-independent `.lua` fallback scan in persisted-state directories for files containing `pfQuest_config`, `pfQuest_track`, or the known unsafe tracking texture path.
+- Back up every matched file before mutation.
+- Remove only the top-level `pfQuest_track` assignment when it can be isolated safely.
+- Quarantine only a file containing the exact unsafe tracking-path signature when surgical repair is impossible.
+- Stop falsely reporting that no repair is required: a missing SavedVariables location now emits a visible warning and a diagnostic log.
+
+## 2.0.0-beta1.15.1 — 2026-08-21
+
+- Fix a deterministic Emberveil `LUA PANIC` on machines with legacy `pfQuest_track` SavedVariables containing runtime texture paths such as `Interface\AddOns\pfQuest\img\tracking\...`.
+- Persist only logical tracking query data; reconstruct texture/runtime metadata after login.
+- Migrate parseable legacy `{ query, meta }` tracking state in memory.
+- Installer now scans the detected Emberveil `WTF` tree before installation, backs up affected `pfQuest.lua` / `pfQuest.lua.bak` files, and removes only the unsafe top-level `pfQuest_track` assignment.
+- If a known-corrupt tracking path is present but the assignment is too malformed to isolate, the installer backs up and quarantines that SavedVariables file so Emberveil can boot instead of panicking before addon load.
+
 ## 2.0.0-beta1.15 — 2026-08-21
 
 - Preserve Emberveil's documented `GetQuestLogTitle` three-state result: `1` complete, `-1` failed, and `nil` incomplete.

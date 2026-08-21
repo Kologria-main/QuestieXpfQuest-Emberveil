@@ -3,7 +3,7 @@
 ## Author: Shagu (pfQuest) + Emberveil compatibility port
 ## Notes: Quest helper/database for Emberveil; pfQuest-derived engine.
 ## Notes-ruRU: Облегченный помощник заданий и база данных
-## Version: EV-2.0.0-beta1.15
+## Version: EV-2.0.0-beta1.18
 ## OptionalDeps: pfUI
 ## SavedVariables: pfQuest_questcache
 ## SavedVariablesPerCharacter: pfQuest_config, pfBrowser_fav, pfQuest_history, pfQuest_colors, pfQuest_server, pfQuest_track

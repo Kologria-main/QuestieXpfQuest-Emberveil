@@ -112,7 +112,8 @@ assertEqual(QuestieEV:CanRenderAvailableQuests(), false, "initial available-ques
 QuestieEV:UseLocalQuestHistory("test-local-only")
 assertEqual(QuestieEV.questStateReady, true, "local history permits active rendering")
 assertEqual(QuestieEV.questHistoryAuthoritative, false, "local history is not authoritative")
-assertEqual(QuestieEV:CanRenderAvailableQuests(), false, "local history hides available starters")
+assertEqual(QuestieEV:CanRenderAvailableQuests(), true, "local history keeps live available starters enabled")
+assertEqual(QuestieEV.availableQuestMode, "local-best-effort", "local best-effort availability mode")
 
 assertEqual(QuestieEV:AcceptCompletedQuestSnapshot({ [7] = true, [42] = true }, "test-server"), true,
   "server snapshot accepted")
@@ -123,7 +124,8 @@ assertEqual(pfQuest_history[42] ~= nil, true, "server completion is recorded")
 assertEqual(QuestieEV:RecordQuestRemoval(88, "track|state=complete1done", false), "complete",
   "explicitly complete removal")
 assertEqual(pfQuest_history[88] ~= nil, true, "explicit completion extends local history")
-assertEqual(QuestieEV:CanRenderAvailableQuests(), false, "removal invalidates snapshot until refresh")
+assertEqual(QuestieEV:CanRenderAvailableQuests(), true,
+  "removal falls back to live local availability when no server history API exists")
 
 QuestieEV:UseLocalQuestHistory("test-after-removal")
 pfQuest_history[99] = { 1, 10 }

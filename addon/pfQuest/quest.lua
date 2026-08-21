@@ -69,6 +69,8 @@ pfQuest.queue = {}
 pfQuest.abandon = ""
 pfQuest.questlog = {}
 pfQuest.questlog_tmp = {}
+pfQuest.questGiverDirty = false
+pfQuest.updateQuestGiversAt = nil
 
 local function tsize(tbl)
   if not tbl or not type(tbl) == "table" then return 0 end
@@ -140,7 +142,8 @@ pfQuest:SetScript("OnUpdate", function()
     this.updateQuestLog = false
   end
 
-  if this.updateQuestGivers == true then
+  if this.updateQuestGivers == true
+      and (not this.updateQuestGiversAt or GetTime() >= this.updateQuestGiversAt) then
     pfQuest:Debug("Update Quest|cff33ffcc Givers")
     if pfQuest_config["trackingmethod"] ~= 4 and
       pfQuest_config["allquestgivers"] == "1"
@@ -149,6 +152,7 @@ pfQuest:SetScript("OnUpdate", function()
       pfDatabase:SearchQuests(meta)
     end
     this.updateQuestGivers = false
+    this.updateQuestGiversAt = nil
   end
 
   if tsize(this.queue) == 0 then return end
@@ -167,6 +171,13 @@ pfQuest:SetScript("OnUpdate", function()
       local rewarded = entry[1] == pfQuest.rewarded
         and pfQuest.rewardedAt
         and GetTime() - pfQuest.rewardedAt <= 10
+      -- Only a reward/abandon changes quest-giver availability in a way that
+      -- requires a global availability reconciliation. A newly accepted quest
+      -- already has its starter removed directly below, so rescanning the entire
+      -- quest database on acceptance only delays objective rendering.
+      if abandoned or rewarded then
+        pfQuest.questGiverDirty = true
+      end
       if QuestieEV and QuestieEV.RecordQuestRemoval then
         QuestieEV:RecordQuestRemoval(entry[2], entry[5], abandoned, rewarded)
       elseif abandoned then
@@ -220,6 +231,14 @@ pfQuest:SetScript("OnUpdate", function()
       end
     end
 
+    -- The minimap uses a spatial cache. Quest events can arrive before the
+    -- NEW/RELOAD/REMOVE node transaction is finished, so invalidate and render
+    -- only after the node mutation above. This prevents a stale-cache rebuild
+    -- from adding visible latency after accepting a quest.
+    if QuestieEV and QuestieEV.NotifyQuestNodesChanged then
+      QuestieEV:NotifyQuestNodesChanged(entry[4])
+    end
+
     -- remove entry from queue
     pfQuest.queue[id] = nil
 
@@ -230,10 +249,16 @@ pfQuest:SetScript("OnUpdate", function()
     end
   end
 
-  -- trigger questgiver update
+  -- A quest accept/remove can change which starters are available. Objective
+  -- progress RELOADs do not, so do not rescan the entire quest database on
+  -- every kill/loot update.
   if tsize(this.queue) == 0 then
     this.updateQuestLog = true
-    this.updateQuestGivers = true
+    if pfQuest.questGiverDirty then
+      this.updateQuestGivers = true
+      this.updateQuestGiversAt = GetTime() + .65
+      pfQuest.questGiverDirty = false
+    end
   end
 end)
 
@@ -242,12 +267,20 @@ function pfQuest:UpdateQuestlog()
   -- initialize flip flop if not yet defined
   pfQuest.questlog_tmp = pfQuest.questlog_tmp or questlog_flip
 
-  local _, numQuests = GetNumQuestLogEntries()
-  local found = 0
+  local numEntries = 0
+  if QuestieEV and QuestieEV.GetQuestLogCounts then
+    numEntries = QuestieEV:GetQuestLogCounts()
+  elseif type(GetNumQuestLogEntries) == "function" then
+    numEntries = tonumber(GetNumQuestLogEntries()) or 0
+  end
+  if numEntries < 0 then numEntries = 0 end
+
   local change = nil
 
-  -- iterate over all quests
-  for qlogid=1,40 do
+  -- Emberveil documents GetNumQuestLogEntries() as the visible row count.
+  -- Iterate exactly those rows instead of relying on Vanilla's undocumented
+  -- second return or a fixed 40-row scan.
+  for qlogid=1,numEntries do
     local title, _, _, header, _, complete = compat.GetQuestLogTitle(qlogid)
     local objectives = GetNumQuestLeaderBoards(qlogid)
     local watched, questid, state
@@ -300,10 +333,6 @@ function pfQuest:UpdateQuestlog()
         pfQuest.questlog_tmp[questid] = pfQuest.questlog[questid]
       end
 
-      found = found + 1
-      if found >= numQuests then
-        break
-      end
     end
   end
 
@@ -339,6 +368,7 @@ function pfQuest:ResetAll()
   pfQuest.questlog = {}
   pfQuest.updateQuestLog = true
   pfQuest.updateQuestGivers = true
+  pfQuest.updateQuestGiversAt = nil
 end
 
 -- register popup dialog to copy urls
