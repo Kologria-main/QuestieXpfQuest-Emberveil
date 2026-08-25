@@ -1,6 +1,6 @@
 # Installation
 
-Download `KoQuest_Emberveil_v2.0.0-beta1.19.zip` from this repository's GitHub release, extract the entire ZIP to a normal folder, and exit Emberveil completely before installing.
+Download `KoQuest_Emberveil_v2.0.0-beta1.20.zip` from this repository's GitHub release, extract the entire ZIP to a normal folder, and exit Emberveil completely before installing.
 
 The public name is KoQuest. The installed folder remains `pfQuest` so upgrades preserve the engine's settings, history, and compatibility with existing installs.
 

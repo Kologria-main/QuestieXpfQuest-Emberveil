@@ -1,5 +1,5 @@
 -- KoQuest for Emberveil / pfQuest map engine
--- v2.0.0-beta1.19
+-- v2.0.0-beta1.20
 --
 -- Design:
 --   * pfQuest database + quest parser
@@ -99,6 +99,9 @@ EV.perf = EV.perf or {
   worldNodeRendered = 0,
   worldNodeSuppressed = 0,
   worldDenseMode = false,
+  worldObjectiveSource = 0,
+  worldObjectiveRendered = 0,
+  worldObjectiveCellSize = 0,
 }
 EV.minimapNextAt = nil
 EV.minimapForceNext = true
@@ -114,6 +117,14 @@ EV.minimapNodeCache = EV.minimapNodeCache or {
 EV.worldMapNextAt = nil
 EV.worldMapForceNext = true
 EV.worldMapWasShown = false
+EV.worldNodeCache = EV.worldNodeCache or {
+  mapID = nil,
+  generation = nil,
+  entries = {},
+  objectiveSource = 0,
+  objectiveRendered = 0,
+  objectiveCellSize = 0,
+}
 EV.locationRefreshSeconds = 0.25
 
 local function chat(msg)
@@ -1009,6 +1020,154 @@ local function IsWorldSummaryNode(node)
   return false
 end
 
+-- Dense questing zones can contain more than a thousand objective spawn
+-- points. Hiding every individual point kept the map fast, but also removed
+-- the small coloured, hoverable pfQuest circles players rely on. Keep those
+-- real Button nodes (and their full tooltips) while coalescing only points
+-- that occupy the same small world-map area. This bounds frame/texture count
+-- without replacing interactive nodes with a decorative texture layer.
+local WORLD_OBJECTIVE_PIN_BUDGET = 320
+local WORLD_OBJECTIVE_GRID_STEPS = {
+  .75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10,
+  12.5, 16, 20, 25, 33, 50, 100,
+}
+
+local function GetWorldObjectiveIdentity(node)
+  local parts = {}
+
+  for title, meta in pairs(node) do
+    local itemParts = {}
+    if type(meta) == "table" and type(meta.item) == "table" then
+      for _, item in ipairs(meta.item) do
+        itemParts[table.getn(itemParts) + 1] = tostring(item)
+      end
+      table.sort(itemParts)
+    end
+
+    parts[table.getn(parts) + 1] = table.concat({
+      tostring(title),
+      tostring(type(meta) == "table" and meta.questid or ""),
+      tostring(type(meta) == "table" and meta.spawnid or ""),
+      tostring(type(meta) == "table" and meta.spawntype or ""),
+      table.concat(itemParts, ","),
+    }, "~")
+  end
+
+  table.sort(parts)
+  return table.concat(parts, ";")
+end
+
+local function BuildWorldObjectiveBuckets(entries, cellSize)
+  local buckets = {}
+  local count = 0
+
+  for _, entry in ipairs(entries) do
+    local cx = math.floor(entry.x / cellSize)
+    local cy = math.floor(entry.y / cellSize)
+    -- Never merge unrelated spawns merely because their circles overlap.
+    -- Keeping the quest/spawn/item identity in the bucket key preserves the
+    -- exact tooltip meaning while still folding repeated coordinates for the
+    -- same objective into a bounded number of buttons.
+    local identity = GetWorldObjectiveIdentity(entry.node)
+    local key = identity .. "|" .. tostring(cx) .. "|" .. tostring(cy)
+    local bucket = buckets[key]
+
+    if not bucket then
+      bucket = {
+        addon = "PFQUEST",
+        node = {},
+        x = entry.x,
+        y = entry.y,
+        sourceKey = entry.key,
+        key = "objective|" .. key,
+      }
+      buckets[key] = bucket
+      count = count + 1
+    end
+
+    -- Display a real database coordinate, never the mathematical centre of a
+    -- bucket. The deterministic lowest source key keeps the chosen location
+    -- stable across refreshes while every visible circle remains truthful.
+    if entry.key < bucket.sourceKey then
+      bucket.x = entry.x
+      bucket.y = entry.y
+      bucket.sourceKey = entry.key
+    end
+
+    -- A combined pfMap node may contain several quest/objective titles.
+    -- Preserve one complete metadata record for each title so NodeEnter keeps
+    -- the same quest-aware tooltip behaviour as an ungrouped spawn point.
+    for title, meta in pairs(entry.node) do
+      if bucket.node[title] == nil then bucket.node[title] = meta end
+    end
+  end
+
+  local grouped = {}
+  for _, bucket in pairs(buckets) do
+    grouped[table.getn(grouped) + 1] = bucket
+  end
+
+  table.sort(grouped, function(a, b) return a.key < b.key end)
+  return grouped, count
+end
+
+function EV:GetWorldRenderEntries(mapID, denseMode)
+  local nodeCache = self:GetMinimapNodeCache(mapID)
+  local generation = nodeCache.generation or 0
+  local cache = self.worldNodeCache
+
+  if cache and cache.mapID == mapID and cache.generation == generation
+      and cache.denseMode == denseMode then
+    return cache
+  end
+
+  cache = {
+    mapID = mapID,
+    generation = generation,
+    denseMode = denseMode,
+    entries = {},
+    objectiveSource = 0,
+    objectiveRendered = 0,
+    objectiveCellSize = 0,
+  }
+
+  local objectives = {}
+  for _, entry in ipairs(nodeCache.entries) do
+    if denseMode and entry.addon == "PFQUEST" and not IsWorldSummaryNode(entry.node) then
+      objectives[table.getn(objectives) + 1] = entry
+    else
+      cache.entries[table.getn(cache.entries) + 1] = entry
+    end
+  end
+
+  cache.objectiveSource = table.getn(objectives)
+
+  if denseMode and cache.objectiveSource > 0 then
+    local budget = WORLD_OBJECTIVE_PIN_BUDGET - table.getn(cache.entries)
+    if budget < 64 then budget = 64 end
+    local grouped = objectives
+    local chosenSize = 0
+
+    for _, cellSize in ipairs(WORLD_OBJECTIVE_GRID_STEPS) do
+      local candidate, candidateCount = BuildWorldObjectiveBuckets(objectives, cellSize)
+      grouped = candidate
+      chosenSize = cellSize
+      if candidateCount <= budget then break end
+    end
+
+    for _, entry in ipairs(grouped) do
+      cache.entries[table.getn(cache.entries) + 1] = entry
+    end
+    cache.objectiveRendered = table.getn(grouped)
+    cache.objectiveCellSize = chosenSize
+  else
+    cache.objectiveRendered = cache.objectiveSource
+  end
+
+  self.worldNodeCache = cache
+  return cache
+end
+
 -- Switching the native world map between zone and continent views can mutate
 -- the shared material behind already-cached minimap textures. UpdateNode's
 -- metadata cache then sees no logical change and leaves a hollow/black pin in
@@ -1073,71 +1232,70 @@ function pfMap:UpdateNodes()
   end
 
   if map then
-    for addon, data in pairs(pfMap.nodes) do
-      if data[map] then
-        for coords, node in pairs(data[map]) do
-          -- Dense questing zones can contain 1,000+ individual spawn buttons.
-          -- Their generated cluster nodes represent the same objective areas
-          -- and remain clickable/tooltip-capable. Prefer those summaries on
-          -- the world map while the minimap keeps nearby individual spawns.
-          if denseMode and not IsWorldSummaryNode(node) then
-            suppressedNodes = suppressedNodes + 1
-          else
-          if not pfMap.pins[i] then
-            pfMap.pins[i] = pfMap:BuildNode("pfMapPin" .. i, WorldMapButton)
-          end
+    local renderCache = EV:GetWorldRenderEntries(map, denseMode)
+    for _, entry in ipairs(renderCache.entries) do
+      local addon = entry.addon
+      local node = entry.node
+      if not pfMap.pins[i] then
+        pfMap.pins[i] = pfMap:BuildNode("pfMapPin" .. i, WorldMapButton)
+      end
 
-          pfMap:UpdateNode(pfMap.pins[i], node, color)
+      pfMap:UpdateNode(pfMap.pins[i], node, color)
 
-          local _, _, sx, sy = string.find(coords, "(.*)|(.*)")
-          local x = tonumber(sx)
-          local y = tonumber(sy)
+      local x = entry.x
+      local y = entry.y
 
-          if x and y then
-            if pfQuest.route and pfQuest.route.AddPoint and (
-                (pfQuest_config["routecluster"] == "1" and pfMap.pins[i].layer >= 9) or
-                (pfQuest_config["routeender"] == "1" and pfMap.pins[i].layer == 4) or
-                (pfQuest_config["routestarter"] == "1" and pfMap.pins[i].layer == 1 and pfMap.pins[i].texture) or
-                (pfQuest_config["routestarter"] == "1" and pfMap.pins[i].layer == 2) or
-                pfMap.pins[i].arrow == true
-              ) then
-              pfQuest.route:AddPoint({ x, y, pfMap.pins[i] })
-            end
-
-            if pfQuest_config["showcluster"] == "0" and pfMap.pins[i].cluster then
-              pfMap.pins[i]:Hide()
-            elseif pfQuest_config["showspawn"] == "0"
-                and addon == "PFQUEST"
-                and not pfMap.pins[i].texture then
-              pfMap.pins[i]:Hide()
-            else
-              if pfQuest.tracker and pfQuest.tracker.ButtonAdd then
-                for title, entry in pairs(pfMap.pins[i].node) do
-                  pfQuest.tracker.ButtonAdd(title, entry)
-                end
-              end
-
-              local w = WorldMapButton:GetWidth()
-              local h = WorldMapButton:GetHeight()
-
-              pfMap.pins[i]:ClearAllPoints()
-              pfMap.pins[i]:SetPoint(
-                "CENTER",
-                WorldMapButton,
-                "TOPLEFT",
-                x / 100 * w,
-                -y / 100 * h
-              )
-              pfMap.pins[i]:Show()
-            end
-
-            i = i + 1
-            renderedNodes = renderedNodes + 1
-          end
-          end
+      if x and y then
+        if pfQuest.route and pfQuest.route.AddPoint and (
+            (pfQuest_config["routecluster"] == "1" and pfMap.pins[i].layer >= 9) or
+            (pfQuest_config["routeender"] == "1" and pfMap.pins[i].layer == 4) or
+            (pfQuest_config["routestarter"] == "1" and pfMap.pins[i].layer == 1 and pfMap.pins[i].texture) or
+            (pfQuest_config["routestarter"] == "1" and pfMap.pins[i].layer == 2) or
+            pfMap.pins[i].arrow == true
+          ) then
+          pfQuest.route:AddPoint({ x, y, pfMap.pins[i] })
         end
+
+        if pfQuest_config["showcluster"] == "0" and pfMap.pins[i].cluster then
+          pfMap.pins[i]:Hide()
+        elseif pfQuest_config["showspawn"] == "0"
+            and addon == "PFQUEST"
+            and not pfMap.pins[i].texture then
+          pfMap.pins[i]:Hide()
+        else
+          if pfQuest.tracker and pfQuest.tracker.ButtonAdd then
+            for title, trackerEntry in pairs(pfMap.pins[i].node) do
+              pfQuest.tracker.ButtonAdd(title, trackerEntry)
+            end
+          end
+
+          local w = WorldMapButton:GetWidth()
+          local h = WorldMapButton:GetHeight()
+
+          pfMap.pins[i]:ClearAllPoints()
+          pfMap.pins[i]:SetPoint(
+            "CENTER",
+            WorldMapButton,
+            "TOPLEFT",
+            x / 100 * w,
+            -y / 100 * h
+          )
+          pfMap.pins[i]:Show()
+        end
+
+        i = i + 1
+        renderedNodes = renderedNodes + 1
       end
     end
+
+    suppressedNodes = renderCache.objectiveSource - renderCache.objectiveRendered
+    EV.perf.worldObjectiveSource = renderCache.objectiveSource
+    EV.perf.worldObjectiveRendered = renderCache.objectiveRendered
+    EV.perf.worldObjectiveCellSize = renderCache.objectiveCellSize
+  else
+    EV.perf.worldObjectiveSource = 0
+    EV.perf.worldObjectiveRendered = 0
+    EV.perf.worldObjectiveCellSize = 0
   end
 
   for j = i, table.getn(pfMap.pins) do
@@ -1613,7 +1771,10 @@ function EV:Diagnostic()
     .. " worldDense=" .. tostring(perf.worldDenseMode)
     .. " worldNodes=" .. tostring(perf.worldNodeRendered or 0)
     .. "/" .. tostring(perf.worldNodeTotal or 0)
-    .. " suppressed=" .. tostring(perf.worldNodeSuppressed or 0))
+    .. " suppressed=" .. tostring(perf.worldNodeSuppressed or 0)
+    .. " objectives=" .. tostring(perf.worldObjectiveRendered or 0)
+    .. "/" .. tostring(perf.worldObjectiveSource or 0)
+    .. " grid=" .. tostring(perf.worldObjectiveCellSize or 0))
 
   local qevZoom = nil
   if Minimap and type(Minimap.GetZoom) == "function" then

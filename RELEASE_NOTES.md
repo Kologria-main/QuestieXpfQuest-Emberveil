@@ -1,4 +1,40 @@
-# KoQuest 2.0.0-beta1.19 — Correctness, Localization, and Linux
+# KoQuest 2.0.0-beta1.20 — Interactive World-Map Objectives
+
+This patch restores the small colored objective circles players expected on the
+Westfall world map without bringing back the earlier non-interactive dot layer
+or the unbounded 1,000-button dense-zone cost.
+
+## What changed
+
+- Dense world maps again show small colored pfQuest objective circles alongside
+  the original route, summary, quest-giver, turn-in, and player-marker icons.
+- The circles are real pfQuest buttons. Hovering shows the original unit/object,
+  level, type, respawn, quest, objective progress, and drop-rate tooltip; clicking
+  retains pfQuest's normal color control.
+- Repeated coordinates are compacted only when a zone is dense. Grouping is
+  limited to the same quest/spawn/item identity, and every displayed circle is
+  placed on a real database coordinate rather than a synthetic average.
+- The compacted set is cached by selected map and quest-node generation. Normal
+  map redraws reuse it instead of rescanning and regrouping the database.
+- `/koquest` now reports rendered/raw objective counts and the selected grid so
+  dense-map behavior can be diagnosed from player reports.
+
+## Live result
+
+On the exact Emberveil live client, Westfall rendered 277 interactive objective
+circles from 997 raw objective points, plus 12 original summary/giver icons (289
+world-map nodes total). The final installed candidate displayed the expected
+`Slark` / `Westfall Stew` / `Murloc Eye` tooltip from one of those circles. Zone → continent → zone transitions
+kept the world circles intact and restored nearby minimap pins after closing the
+map. Steady-state observed FPS returned to approximately 104–113, with the
+diagnostic rolling average around 101 FPS.
+
+All beta1.19 correctness, available-quest, completed-history, localization,
+Linux/Wine/Proton, installer, and minimap protections remain unchanged.
+
+---
+
+# Previous: 2.0.0-beta1.19 — Correctness, Localization, and Linux
 
 This update is driven by KoQuest page feedback and the measured UnrealRuntimeCompat database supplied by Thomas. It prioritizes truthful quest state over marker quantity.
 

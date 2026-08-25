@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-VERSION='2.0.0-beta1.19'
+VERSION='2.0.0-beta1.20'
 SCRIPT_DIR=$(CDPATH= cd -P "$(dirname "$0")" && pwd)
 SOURCE_ROOT="$SCRIPT_DIR/addon/pfQuest"
 MANIFEST="$SCRIPT_DIR/installer/payload-manifest.sha256"

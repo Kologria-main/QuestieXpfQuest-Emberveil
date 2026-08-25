@@ -12,7 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Version = '2.0.0-beta1.19'
+$Version = '2.0.0-beta1.20'
 $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $SourceRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseRoot 'addon\pfQuest'))
 $ManifestPath = Join-Path $PSScriptRoot 'payload-manifest.sha256'

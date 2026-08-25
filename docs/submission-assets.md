@@ -4,7 +4,7 @@ These are real KoQuest screenshots recovered from the existing moderated addon
 page. They are included in the same public repository so future submissions can
 use stable, reviewable files.
 
-Recommended order for beta1.19 (up to five):
+Recommended order for beta1.20 (up to five):
 
 1. `assets/screenshots/koquest-minimap-tracker.png` - minimap markers, an objective tooltip, and the quest tracker.
 2. `assets/screenshots/koquest-tracker.png` - tracker rows and objectives.
@@ -13,12 +13,11 @@ Recommended order for beta1.19 (up to five):
 
 Optional alternate: `assets/screenshots/koquest-tooltip.png`.
 
-Do not use `assets/screenshots/koquest-world-map.png` for beta1.19. It is a real
-screenshot from the older moderated page, but it shows the pre-beta1.19 raw
-world-map spawn field. The final beta1.19 world map intentionally retains only
-the original hoverable pfQuest summary and quest-giver icons in dense zones.
-Capture a fresh beta1.19 world-map screenshot before replacing the live page
-gallery.
+Do not use `assets/screenshots/koquest-world-map.png` for beta1.20. It is a real
+screenshot from the older moderated page, but it predates the bounded,
+tooltip-capable world-map objective renderer. Capture a fresh beta1.20 world-map
+screenshot showing the colored circles and one open objective tooltip before
+replacing the live page gallery.
 
 Icon: `assets/icon.png`.
 

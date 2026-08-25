@@ -2,13 +2,14 @@
 
 Quest and objective markers for the Emberveil client, built from the proven [pfQuest](https://github.com/shagu/pfQuest) engine and adapted for Emberveil's Unreal-backed UI and Vanilla-style Lua API.
 
-Current development release: **2.0.0-beta1.19**
+Current development release: **2.0.0-beta1.20**
 
 > KoQuest is a community beta, not an official Emberveil addon. It is deliberately conservative: if the client cannot prove that a coordinate or quest state is valid, the addon hides the affected marker instead of showing a potentially wrong one.
 
 ## What it provides
 
 - Active quest objectives on the world map and minimap.
+- Small colored world-map objective circles with the same detailed hover tooltips as minimap nodes, compacted only when a zone would otherwise create an excessive number of buttons.
 - Quest-turn-in markers only after official quest-level completion.
 - Available quest-giver markers on the world map and minimap, filtered by level, race, class, prerequisites, the active quest log, and KoQuest's recorded completion history.
 - A searchable pfQuest database and tracker.
@@ -69,7 +70,7 @@ pnpm validate
 powershell -NoProfile -File .\scripts\validate-release.ps1
 ```
 
-The exact beta1.19 evidence is recorded in [Release validation](docs/release-validation.md). The broader scope and remaining client-dependent checks are documented in [Testing](docs/testing.md) and [Known issues](docs/known-issues.md).
+The exact beta1.20 evidence is recorded in [Release validation](docs/release-validation.md). The broader scope and remaining client-dependent checks are documented in [Testing](docs/testing.md) and [Known issues](docs/known-issues.md).
 
 ## Credits and license
 
