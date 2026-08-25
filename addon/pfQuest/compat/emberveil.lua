@@ -1,9 +1,9 @@
--- Questie Emberveil / pfQuest engine
--- Early compatibility layer v2.0.0-beta1.18
+-- KoQuest for Emberveil / pfQuest engine
+-- Early compatibility layer v2.0.0-beta1.19
 
 QuestieEV = QuestieEV or {}
 local EV = QuestieEV
-EV.version = "2.0.0-beta1.18"
+EV.version = "2.0.0-beta1.19"
 EV.engine = "pfQuest"
 EV.sourceCommit = "104f35678ca39ab1fb78b655f815cc7016f5e0c8"
 
@@ -15,14 +15,16 @@ end
 
 local _G = getfenv(0)
 
--- beta1.8 stable-core policy:
--- Never force Emberveil's native map context from pfQuest.
+-- Stable-core policy: upstream pfQuest never drives Emberveil's native map
+-- context. KoQuest keeps raw mapping calls only for its tightly gated,
+-- hidden-map cold-start recovery path.
 --
 -- IMPORTANT: the raw function is stored under a field name that does NOT
 -- contain "GetPlayerMapPosition". This prevents installer call-rewriters from
 -- ever rewriting the wrapper's own backing function again.
 EV._rawPlayerMapPos = EV._rawPlayerMapPos or _G["GetPlayerMapPosition"]
 EV._rawSetCurrentZone = EV._rawSetCurrentZone or _G["SetMapToCurrentZone"]
+EV._rawSetMapZoom = EV._rawSetMapZoom or _G["SetMapZoom"]
 
 function QuestieEV_SafeGetPlayerMapPosition(unit)
   local fn = EV._rawPlayerMapPos
@@ -70,10 +72,12 @@ EV.questSyncAt = nil
 EV.questHistoryAuthoritative = false
 EV.availableQuestMode = "pending"
 EV.sessionConfirmedCompletions = EV.sessionConfirmedCompletions or {}
+pfQuest_confirmedAvailable = type(pfQuest_confirmedAvailable) == "table"
+  and pfQuest_confirmedAvailable or {}
 
 local function chat(msg)
   if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccQuestie EV:|r " .. tostring(msg))
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccKoQuest:|r " .. tostring(msg))
   end
 end
 EV.Chat = chat
@@ -154,12 +158,51 @@ end
 EV._rawCompatQuestLogTitle = EV._rawCompatQuestLogTitle or
   (pfQuestCompat and pfQuestCompat.GetQuestLogTitle)
 
+local function CleanQuestLogTitle(title)
+  if type(title) ~= "string" then return title, false end
+
+  local cleaned = string.gsub(title, "|c%x%x%x%x%x%x%x%x", "")
+  cleaned = string.gsub(cleaned, "|r", "")
+
+  -- Some Emberveil/CT_QuestLevels combinations decorate localized titles with
+  -- one or more level groups (for example "[24] [24+] Title"). Only strip a
+  -- bracket group whose first character is a digit so genuine titles beginning
+  -- with brackets remain untouched.
+  for _ = 1, 3 do
+    local nextTitle, count = string.gsub(cleaned, "^%s*%[%d[^%]]*%]%s*", "", 1)
+    if count == 0 then break end
+    cleaned = nextTitle
+  end
+
+  return cleaned, cleaned ~= title
+end
+
+EV.CleanQuestLogTitle = CleanQuestLogTitle
+EV.decoratedQuestTitleReads = EV.decoratedQuestTitleReads or 0
+
 if pfQuestCompat and type(EV._rawCompatQuestLogTitle) == "function" then
   pfQuestCompat.GetQuestLogTitle = function(id)
-    local ok, title, level, tag, header, collapsed, complete =
-      pcall(EV._rawCompatQuestLogTitle, id)
+    -- CT_QuestLevels can be installed after pfQuest's client layer was loaded.
+    -- Resolve its preserved native getter on every call instead of caching an
+    -- early absence. If it is unhealthy, fall back to pfQuest's captured API.
+    local source = _G and _G["CT_QuestLevels_oldGetQuestLogTitle"] or nil
+    local ok, title, level, tag, header, collapsed, complete
+    if type(source) == "function" then
+      ok, title, level, tag, header, collapsed, complete = pcall(source, id)
+      if not ok then source = nil end
+    end
+    if type(source) ~= "function" then
+      ok, title, level, tag, header, collapsed, complete =
+        pcall(EV._rawCompatQuestLogTitle, id)
+    end
 
     if not ok then return nil, nil, nil, nil, nil, nil end
+
+    local decorated
+    title, decorated = CleanQuestLogTitle(title)
+    if decorated then
+      EV.decoratedQuestTitleReads = EV.decoratedQuestTitleReads + 1
+    end
 
     if complete == true or complete == 1 then
       complete = 1
@@ -316,11 +359,89 @@ local function CompletedSnapshotToHistory(snapshot)
 end
 
 function EV:CanRenderAvailableQuests()
-  -- Live availability must continue to work even when Emberveil lacks a
-  -- character-wide completed-quest API. questStateReady means active/local
-  -- quest state has been reconciled. questHistoryAuthoritative is diagnostic
-  -- quality metadata, not a render kill-switch.
-  return self.questStateReady == true
+  local mode = self:GetAvailableQuestMode()
+  self.availableQuestMode = mode
+  return mode == "authoritative" or mode == "local-best-effort"
+end
+
+-- Emberveil has no character-wide completed-quest getter, but a QUEST_DETAIL
+-- packet is authoritative evidence that the server is offering that exact
+-- quest to this character now. Remember only those exact, uniquely resolved
+-- titles. This lets strict mode display a quest after the client confirms it
+-- without enabling every speculative pfQuest starter or resurrecting a quest
+-- that local history knows was completed.
+function EV:IsClientConfirmedAvailableQuest(id)
+  id = tonumber(id)
+  if not id or type(pfQuest_confirmedAvailable) ~= "table"
+      or pfQuest_confirmedAvailable[id] == nil then return false end
+
+  if (type(pfQuest_history) == "table" and pfQuest_history[id])
+      or (pfQuest and type(pfQuest.questlog) == "table" and pfQuest.questlog[id]) then
+    pfQuest_confirmedAvailable[id] = nil
+    return false
+  end
+  return true
+end
+
+function EV:HasClientConfirmedAvailableQuests()
+  if type(pfQuest_confirmedAvailable) ~= "table" then return false end
+  for id in pairs(pfQuest_confirmedAvailable) do
+    if self:IsClientConfirmedAvailableQuest(id) then return true end
+  end
+  return false
+end
+
+function EV:ConfirmAvailableQuestTitle(title, source)
+  if type(title) ~= "string" or title == "" or not pfDatabase
+      or type(pfDatabase.GetIDByName) ~= "function" then return false end
+
+  local matches = pfDatabase:GetIDByName(title, "quests")
+  if type(matches) ~= "table" then return false end
+
+  local questID, count = nil, 0
+  for id in pairs(matches) do
+    questID = tonumber(id)
+    count = count + 1
+    if count > 1 then return false end
+  end
+  if count ~= 1 or not questID then return false end
+
+  if (type(pfQuest_history) == "table" and pfQuest_history[questID])
+      or (pfQuest and type(pfQuest.questlog) == "table" and pfQuest.questlog[questID]) then
+    pfQuest_confirmedAvailable[questID] = nil
+    return false
+  end
+
+  pfQuest_confirmedAvailable[questID] = {
+    title = title,
+    confirmed = type(time) == "function" and time() or 0,
+    source = source or "QUEST_DETAIL",
+  }
+
+  if pfQuest then
+    pfQuest.updateQuestGivers = true
+    pfQuest.updateQuestGiversAt = GetTime() + .05
+  end
+  if self.MarkMinimapNodeCacheDirty then
+    self:MarkMinimapNodeCacheDirty("client-confirmed-available")
+  end
+  self.worldMapForceNext = true
+  return true
+end
+
+function EV:GetAvailableQuestMode()
+  if self.questStateReady ~= true then return "pending" end
+  if self.questHistoryAuthoritative == true then return "authoritative" end
+
+  -- Emberveil exposes no verified character-wide completion API. Use pfQuest's
+  -- database eligibility plus KoQuest's local completion history by default so
+  -- players can actually see quest starters. The clearly labelled setting can
+  -- still disable unverified starters for users who prefer fail-closed output.
+  if type(pfQuest_config) == "table"
+      and pfQuest_config["unverifiedquestgivers"] == "1" then
+    return "local-best-effort"
+  end
+  return "strict-hidden"
 end
 
 function EV:GetQuestLogCounts()
@@ -333,15 +454,35 @@ function EV:GetQuestLogCounts()
   if entries < 0 then entries = 0 end
 
   local quests = 0
+  local completeSnapshot = true
   if pfQuestCompat and type(pfQuestCompat.GetQuestLogTitle) == "function" then
     for index = 1, entries do
-      local ok, title, _, _, header =
+      local ok, title, _, _, header, collapsed =
         pcall(pfQuestCompat.GetQuestLogTitle, index)
       if ok and title and not header then quests = quests + 1 end
+      if ok and header and (collapsed == true or collapsed == 1) then
+        completeSnapshot = false
+      end
     end
   end
 
-  return entries, quests
+  self.questLogSnapshotComplete = completeSnapshot
+  if completeSnapshot == false and not self.collapsedQuestLogWarned then
+    self.collapsedQuestLogWarned = true
+    if self.Chat then
+      self.Chat("a quest-log category is collapsed. Existing tracked quests are preserved, " ..
+        "but expand the category once after accepting a new quest so its objectives can be discovered.")
+    end
+  end
+  return entries, quests, completeSnapshot
+end
+
+function EV:PreserveHiddenQuestLog(previous, current, snapshotComplete)
+  if snapshotComplete ~= false or type(previous) ~= "table"
+      or type(current) ~= "table" then return end
+  for questid, data in pairs(previous) do
+    if current[questid] == nil then current[questid] = data end
+  end
 end
 
 function EV:RebuildAuthoritativeQuestState(reason)
@@ -430,15 +571,21 @@ function EV:UseLocalQuestHistory(reason)
   self.questSyncDone = true
   self.questStateReady = true
   self.questHistoryAuthoritative = false
-  self.availableQuestMode = "local-best-effort"
+  self.availableQuestMode = self:GetAvailableQuestMode()
   self.questSyncDeadline = nil
   self.questSyncAt = nil
 
   self:RebuildAuthoritativeQuestState(self.questSyncSource)
 
   if self.Chat then
-    self.Chat("server completion snapshot unavailable; using classic local quest history (" ..
-      tostring(self.questSyncCount) .. " recorded). Live quest-giver markers remain enabled.")
+    if self.availableQuestMode == "local-best-effort" then
+      self.Chat("server completion snapshot unavailable; using best-effort quest history (" ..
+        tostring(self.questSyncCount) .. " recorded). Completed pre-install quests may appear.")
+    else
+      self.Chat("server completion snapshot unavailable; available quest-giver markers are hidden " ..
+        "for correctness (" .. tostring(self.questSyncCount) .. " locally recorded). " ..
+        "You can explicitly enable best-effort markers in KoQuest settings.")
+    end
   end
 end
 

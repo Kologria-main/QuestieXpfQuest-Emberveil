@@ -2,7 +2,7 @@
 
 ## pfQuest
 
-Questie Emberveil is derived from [pfQuest](https://github.com/shagu/pfQuest), pinned for this port at commit `104f35678ca39ab1fb78b655f815cc7016f5e0c8`.
+KoQuest is derived from [pfQuest](https://github.com/shagu/pfQuest), pinned for this port at commit `104f35678ca39ab1fb78b655f815cc7016f5e0c8`.
 
 Copyright © 2017–2021 Eric Mauser (Shagu). Licensed under the MIT License. The required copyright and permission notice is preserved in the repository root and in `addon/pfQuest/LICENSE`.
 

@@ -1,4 +1,34 @@
-# Questie Emberveil 2.0.0-beta1.18 — Performance Hardening
+# KoQuest 2.0.0-beta1.19 — Correctness, Localization, and Linux
+
+This update is driven by KoQuest page feedback and the measured UnrealRuntimeCompat database supplied by Thomas. It prioritizes truthful quest state over marker quantity.
+
+## Correctness changes
+
+- Available quest-giver markers are enabled by default on both map surfaces and are filtered through level, race, class, prerequisites, the active quest log, and KoQuest's recorded completion history.
+- The clearly labeled **Allow Best-Effort Quest Givers (May Include Completed Quests)** control remains available for players who prefer to disable all unverified starters. Emberveil exposes no verified character-wide completion getter, so no addon can passively identify every quest completed before its installation.
+- Accepted-quest objective nodes keep the original hoverable pfQuest icons on the world map. Dense zones use the existing bounded summary nodes; the experimental non-hoverable dot overlay is not shipped.
+- Russian-style runtime level prefixes such as `[24]` and `[15G5]` are removed before database title matching. A CT_QuestLevels original getter loaded after KoQuest is discovered dynamically.
+- Collapsed quest-log headers no longer make hidden quests look abandoned or completed, and no longer erase them from the tracker.
+- Measured numeric race/class IDs are used for locale-independent quest filtering.
+
+## Platform, language, and packaging
+
+- Added a transactional, offline Linux/Wine/Proton installer with the same payload-hash, backup, staging, verification, and rollback policy as Windows.
+- Added requested-locale validation for ruRU, zhCN, and zhTW; every base enUS item, unit, quest, zone, profession, and object ID must be present.
+- KoQuest is now the public name. The `pfQuest` folder and SavedVariables names stay unchanged so upgrades preserve settings and history.
+- Windows SavedVariables recovery is now bounded and release tests use an explicit isolated root. Broad profile scanning is disabled unless a support operator deliberately opts in.
+
+## Retained performance protections
+
+All beta1.18 route, tracker, spatial cache, fixed 20 Hz minimap projection, world-map throttle, render-nudge, and bounded-pool hardening remains in place. Removing the experimental world-map dot overlay also removes hundreds of extra textures from dense maps.
+
+## Validation scope
+
+Offline gates cover Lua 5.1 syntax, safety contracts, localized database coverage, quest-state simulation, collapsed-log preservation, installer isolation, payload hashes, tamper rejection, Linux installation, ZIP traversal/CRC, and deterministic builds. Target-client smoke results are recorded separately in `docs/release-validation.md`; a beta is not called stable based on offline tests alone.
+
+---
+
+# Previous: 2.0.0-beta1.18 — Performance Hardening
 
 This build keeps the beta1.17 quest/map behavior that was verified in game and focuses only on reducing unnecessary work during normal play. No quest-database or marker-visibility policy was intentionally changed.
 

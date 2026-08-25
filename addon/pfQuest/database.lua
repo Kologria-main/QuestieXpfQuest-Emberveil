@@ -33,7 +33,7 @@ end
 -- Return the best cluster point for a coordiante table
 local best, neighbors = { index = 1, neighbors = 0 }, 0
 local cache, cacheindex = {}
-local ymin, ymax, xmin, ymax
+local ymin, ymax, xmin, xmax
 local function getcluster(tbl, name)
   local count = 0
   best.index, best.neighbors = 1, 0
@@ -522,7 +522,13 @@ end
 
 -- GetBitByRace
 -- Returns bit of the current race
-function pfDatabase:GetBitByRace(model)
+function pfDatabase:GetBitByRace(model, numericID)
+  local id = tonumber(numericID)
+  if id and id >= 1 and id <= 31 then
+    local bit = 2 ^ (id - 1)
+    if bitraces[bit] then return bit end
+  end
+
   -- scan for regular bitmasks
   for bit, v in pairs(bitraces) do
     if model == v then return bit end
@@ -534,7 +540,13 @@ end
 
 -- GetBitByClass
 -- Returns bit of the current class
-function pfDatabase:GetBitByClass(class)
+function pfDatabase:GetBitByClass(class, numericID)
+  local id = tonumber(numericID)
+  if id and id >= 1 and id <= 31 then
+    local bit = 2 ^ (id - 1)
+    if bitclasses[bit] then return bit end
+  end
+
   for bit, v in pairs(bitclasses) do
     if class == v then return bit end
   end
@@ -1471,10 +1483,13 @@ function pfDatabase:SearchQuest(quest, meta, partial)
 end
 
 function pfDatabase:QuestFilter(id, plevel, pclass, prace)
-  -- On Emberveil without a bulk completed-quest API, use pfQuest's classic
-  -- local-history filtering. Do not globally suppress live quest availability.
+  -- Strict mode suppresses uncertain available starters when Emberveil cannot
+  -- provide character-wide completion history. Active quest objectives do not
+  -- pass through this filter and remain visible.
   if QuestieEV and QuestieEV.CanRenderAvailableQuests
-      and not QuestieEV:CanRenderAvailableQuests() then return end
+      and not QuestieEV:CanRenderAvailableQuests()
+      and not (QuestieEV.IsClientConfirmedAvailableQuest
+        and QuestieEV:IsClientConfirmedAvailableQuest(id)) then return end
 
   -- hide active quest
   if pfQuest.questlog[id] then return end
@@ -1529,11 +1544,16 @@ function pfDatabase:SearchQuests(meta, maps)
   local maps = maps or {}
   local meta = meta or {}
 
-  -- Do not render while quest state is actively reconciling, but local history
-  -- is sufficient for classic pfQuest-style live availability.
+  -- Do not render uncertain starters while quest state is reconciling or while
+  -- strict completed-history mode is active.
+  local clientConfirmedOnly = false
   if QuestieEV and QuestieEV.CanRenderAvailableQuests
       and not QuestieEV:CanRenderAvailableQuests() then
-    return maps
+    if not QuestieEV.HasClientConfirmedAvailableQuests
+        or not QuestieEV:HasClientConfirmedAvailableQuests() then
+      return maps
+    end
+    clientConfirmedOnly = true
   end
 
   local plevel = UnitLevel("player")
@@ -1546,13 +1566,16 @@ function pfDatabase:SearchQuests(meta, maps)
     pfaction = "GM"
   end
 
-  local _, race = UnitRace("player")
-  local prace = pfDatabase:GetBitByRace(race)
-  local _, class = UnitClass("player")
-  local pclass = pfDatabase:GetBitByClass(class)
+  local _, race, raceID = UnitRace("player")
+  local prace = pfDatabase:GetBitByRace(race, raceID)
+  local _, class, classID = UnitClass("player")
+  local pclass = pfDatabase:GetBitByClass(class, classID)
 
   for id in pairs(quests) do
-    if pfDatabase:QuestFilter(id, plevel, pclass, prace) then
+    if (not clientConfirmedOnly or (
+          QuestieEV.IsClientConfirmedAvailableQuest
+          and QuestieEV:IsClientConfirmedAvailableQuest(id)
+        )) and pfDatabase:QuestFilter(id, plevel, pclass, prace) then
       -- set metadata
       meta["quest"] = ( pfDB.quests.loc[id] and pfDB.quests.loc[id].T ) or UNKNOWN
       meta["questid"] = id
@@ -1711,10 +1734,10 @@ function pfDatabase:GetQuestIDs(qid)
     return pfQuest_questcache[identifier]
   end
 
-  local _, race = UnitRace("player")
-  local prace = pfDatabase:GetBitByRace(race)
-  local _, class = UnitClass("player")
-  local pclass = pfDatabase:GetBitByClass(class)
+  local _, race, raceID = UnitRace("player")
+  local prace = pfDatabase:GetBitByRace(race, raceID)
+  local _, class, classID = UnitClass("player")
+  local pclass = pfDatabase:GetBitByClass(class, classID)
 
   local best = -1
   local bestIDs = {}

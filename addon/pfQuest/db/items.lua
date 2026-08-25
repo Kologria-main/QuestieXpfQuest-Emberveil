@@ -146493,7 +146493,13 @@ pfDB["items"]["data"] = {
   },
   [7673] = {},
   [7674] = {},
-  [7675] = {},
+  -- Snatch and Grab: the classic item table omitted the source even though the
+  -- quest text, unit table, and TBC database all identify Defias Dockmaster.
+  [7675] = {
+    ["U"] = {
+      [6846] = 100,
+    },
+  },
   [7676] = {},
   [7677] = {},
   [7678] = {},

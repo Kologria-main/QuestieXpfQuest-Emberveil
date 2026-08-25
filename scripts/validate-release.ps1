@@ -9,6 +9,7 @@ $repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $addon = Join-Path $repo 'addon\pfQuest'
 $manifestPath = Join-Path $repo 'installer\payload-manifest.sha256'
 $installer = Join-Path $repo 'installer\Install-Questie-Emberveil.ps1'
+$linuxInstaller = Join-Path $repo 'INSTALL_KOQUEST_LINUX.sh'
 
 function Read-Manifest {
     $entries = @()
@@ -36,14 +37,38 @@ function Assert-TreeMatchesManifest {
 }
 
 function Invoke-InstallerProcess {
-    param([string]$Script, [string]$AddOns, [string]$State, [switch]$ValidateOnly)
+    param([string]$Script, [string]$AddOns, [string]$State, [string]$SavedVariables, [switch]$ValidateOnly)
     $hostExe = (Get-Process -Id $PID).Path
     $args = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Script,
-        '-InstallHint', $AddOns, '-NonInteractive', '-StateRoot', $State)
+        '-InstallHint', $AddOns, '-NonInteractive', '-StateRoot', $State,
+        '-SavedVariablesRoot', $SavedVariables)
     if ($ValidateOnly) { $args += '-ValidateOnly' }
     & $hostExe @args | ForEach-Object { Write-Host $_ }
     $code = $LASTEXITCODE
     return $code
+}
+
+function Convert-ToMsysPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    if ($full -match '^([A-Za-z]):\\(.*)$') {
+        return ('/' + $Matches[1].ToLowerInvariant() + '/' + $Matches[2].Replace('\', '/'))
+    }
+    return $full.Replace('\', '/')
+}
+
+function Find-PosixShell {
+    $command = Get-Command bash -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    foreach ($candidate in @(
+        'C:\Program Files\Git\bin\bash.exe',
+        'C:\Program Files\Git\usr\bin\sh.exe',
+        'C:\Program Files (x86)\Git\bin\bash.exe',
+        '/bin/sh'
+    )) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    return $null
 }
 
 $manifest = @(Read-Manifest)
@@ -56,7 +81,9 @@ foreach ($xmlFile in Get-ChildItem -LiteralPath $addon -Recurse -Filter '*.xml' 
 
 $validateState = Join-Path ([System.IO.Path]::GetTempPath()) ('.qev-validate-' + [guid]::NewGuid().ToString('N'))
 try {
-    $exitCode = Invoke-InstallerProcess $installer $repo $validateState -ValidateOnly
+    $validateSavedVariables = Join-Path $validateState 'SavedVariables'
+    New-Item -ItemType Directory -Path $validateSavedVariables -Force | Out-Null
+    $exitCode = Invoke-InstallerProcess $installer $repo $validateState $validateSavedVariables -ValidateOnly
     if ($exitCode -ne 0) { throw "Installer validation-only mode failed with exit code $exitCode." }
 } finally {
     if (Test-Path -LiteralPath $validateState) {
@@ -71,17 +98,39 @@ if (-not $SkipInstallerTests) {
     $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('.qev-installer-test-' + [guid]::NewGuid().ToString('N'))
     $addOns = Join-Path $testRoot 'Games\Emberveil\live\Azeroth\Interface\AddOns'
     $state = Join-Path $testRoot 'State'
+    $savedVariables = Join-Path $testRoot 'SavedVariables'
     try {
         New-Item -ItemType Directory -Path $addOns -Force | Out-Null
+        New-Item -ItemType Directory -Path $savedVariables -Force | Out-Null
 
-        $exitCode = Invoke-InstallerProcess $installer $addOns $state
+        $savedVariableFile = Join-Path $savedVariables 'pfQuest.lua'
+        @(
+            'pfQuest_track = {'
+            '  texture = "Interface\\AddOns\\pfQuest\\img\\tracking\\available"'
+            '}'
+            'pfQuest_config = { allquestgivers = "1" }'
+        ) | Set-Content -LiteralPath $savedVariableFile -Encoding ASCII
+
+        $timer = [System.Diagnostics.Stopwatch]::StartNew()
+        $exitCode = Invoke-InstallerProcess $installer $addOns $state $savedVariables
+        $timer.Stop()
         if ($exitCode -ne 0) { throw "Clean installer test failed with exit code $exitCode." }
+        if ($timer.Elapsed.TotalSeconds -gt 45) { throw "Installer isolation test exceeded 45 seconds." }
+        $repairedText = Get-Content -LiteralPath $savedVariableFile -Raw
+        if ($repairedText -match '(?m)^pfQuest_track[ `t]*=') {
+            throw 'Installer did not remove the unsafe pfQuest_track assignment.'
+        }
+        if ($repairedText -notmatch '(?m)^pfQuest_config[ `t]*=') {
+            throw 'Installer damaged unrelated SavedVariables data.'
+        }
+        $savedBackup = @(Get-ChildItem -LiteralPath (Join-Path $state 'Backups') -Recurse -Filter '*pfQuest.lua' -File)
+        if ($savedBackup.Count -eq 0) { throw 'Installer did not back up the repaired SavedVariables file.' }
         $installed = Join-Path $addOns 'pfQuest'
         Assert-TreeMatchesManifest $installed $manifest
 
         $legacyMarker = Join-Path $installed 'legacy-marker.txt'
         Set-Content -LiteralPath $legacyMarker -Value 'backup-test' -Encoding ASCII
-        $exitCode = Invoke-InstallerProcess $installer $addOns $state
+        $exitCode = Invoke-InstallerProcess $installer $addOns $state $savedVariables
         if ($exitCode -ne 0) { throw "Upgrade installer test failed with exit code $exitCode." }
         Assert-TreeMatchesManifest $installed $manifest
         if (Test-Path -LiteralPath $legacyMarker) { throw 'Upgrade left an obsolete file in the installed addon.' }
@@ -94,11 +143,22 @@ if (-not $SkipInstallerTests) {
         Copy-Item -LiteralPath (Join-Path $repo 'installer') -Destination $tamperedRoot -Recurse -Force
         Add-Content -LiteralPath (Join-Path $tamperedRoot 'addon\pfQuest\compat\emberveil.lua') -Value '-- tampered'
         $tamperedInstaller = Join-Path $tamperedRoot 'installer\Install-Questie-Emberveil.ps1'
-        $exitCode = Invoke-InstallerProcess $tamperedInstaller $addOns (Join-Path $testRoot 'TamperedState')
+        $exitCode = Invoke-InstallerProcess $tamperedInstaller $addOns (Join-Path $testRoot 'TamperedState') $savedVariables
         if ($exitCode -eq 0) { throw 'Tampered-payload installer test unexpectedly succeeded.' }
         Assert-TreeMatchesManifest $installed $manifest
 
-        Write-Host 'PASS: installer clean install, upgrade/backup, and tamper rejection passed.' -ForegroundColor Green
+        $posixShell = Find-PosixShell
+        if (-not $posixShell) { throw 'No POSIX shell is available to validate the advertised Linux installer.' }
+        & $posixShell -n (Convert-ToMsysPath $linuxInstaller)
+        if ($LASTEXITCODE -ne 0) { throw "Linux installer syntax validation failed with exit code $LASTEXITCODE." }
+        $linuxAddOns = Join-Path $testRoot 'Linux\Emberveil\live\Azeroth\Interface\AddOns'
+        New-Item -ItemType Directory -Path $linuxAddOns -Force | Out-Null
+        & $posixShell (Convert-ToMsysPath $linuxInstaller) (Convert-ToMsysPath $linuxAddOns) |
+            ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) { throw "Linux installer test failed with exit code $LASTEXITCODE." }
+        Assert-TreeMatchesManifest (Join-Path $linuxAddOns 'pfQuest') $manifest
+
+        Write-Host 'PASS: isolated SavedVariables repair, Windows install/upgrade, tamper rejection, and Linux install passed.' -ForegroundColor Green
     } finally {
         if (Test-Path -LiteralPath $testRoot) {
             $resolved = [System.IO.Path]::GetFullPath($testRoot)

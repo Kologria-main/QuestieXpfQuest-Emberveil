@@ -1,6 +1,6 @@
 # Diagnostics
 
-Run `/qev` in chat. It reports the addon version, database localization, player and selected map identity, coordinate freshness/source, completed-quest synchronization status, whether history is authoritative, whether available quest givers are permitted, node counts, minimap policy, indoor/outdoor environment source, adaptive update cadence, FPS sample, and compatibility fallbacks.
+Run `/koquest` in chat (`/qev` remains a compatibility alias). It reports the addon version, database localization, player and selected map identity, coordinate freshness/source, completed-quest synchronization status, whether history is authoritative, available-quest safety mode, collapsed-log snapshot state, cleaned localized-title count, node counts, minimap policy, indoor/outdoor environment source, adaptive update cadence, FPS sample, and compatibility fallbacks.
 
 The quest-state line has two important guarantees:
 
@@ -14,19 +14,19 @@ The quest-state line has two important guarantees:
 Useful commands:
 
 ```text
-/qev force    Rebuild objectives, quest givers, and map nodes
-/qev sync     Retry completed-quest synchronization
-/qev map      Refresh the visible map and print diagnostics
+/koquest force    Rebuild objectives, quest givers, and map nodes
+/koquest sync     Retry completed-quest synchronization
+/koquest map      Refresh the visible map and print diagnostics
 ```
 
 For a useful bug report, include:
 
 - Emberveil client/build version.
-- Questie Emberveil version from `/qev`.
+- KoQuest version from `/koquest`.
 - Character faction, level, zone, subzone/building, and whether you are in an instance.
 - Quest name and objective text exactly as shown.
 - What you expected and what was displayed.
-- Whether the world map was open and whether `/reload` or `/qev force` changed the result.
-- The `/qev` lines, with any personal information removed.
+- Whether the world map was open and whether `/reload` or `/koquest force` changed the result.
+- The `/koquest` lines, with any personal information removed.
 
 For a crash, also include the last action before the crash, reproducibility, other enabled addons, and the relevant client crash log. Never publish credentials, access tokens, email addresses, or private server addresses.

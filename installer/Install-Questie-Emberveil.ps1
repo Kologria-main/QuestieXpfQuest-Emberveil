@@ -3,13 +3,16 @@ param(
     [string]$InstallHint,
     [switch]$NonInteractive,
     [switch]$ValidateOnly,
-    [string]$StateRoot
+    [string]$StateRoot,
+    [string]$SavedVariablesRoot,
+    [switch]$SkipSavedVariablesRepair,
+    [switch]$AllowBroadSavedVariablesScan
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Version = '2.0.0-beta1.18'
+$Version = '2.0.0-beta1.19'
 $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $SourceRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseRoot 'addon\pfQuest'))
 $ManifestPath = Join-Path $PSScriptRoot 'payload-manifest.sha256'
@@ -125,12 +128,18 @@ function Get-SavedVariablesSearchRoots {
     $roots = New-Object 'System.Collections.Generic.List[string]'
     $seen = @{}
 
-    # 1) Walk the Emberveil install ancestry. This covers both classic-style
-    # WTF layouts and any server/launcher-owned data directories placed next
-    # to live/Azeroth.
+    # Tests, support sessions, and nonstandard installs can provide one exact
+    # root. Never mix an explicit boundary with automatic profile-wide roots.
+    if (-not [string]::IsNullOrWhiteSpace($SavedVariablesRoot)) {
+        Get-UniqueExistingDirectory -List $roots -Seen $seen -Path $SavedVariablesRoot
+        return $roots
+    }
+
+    # Walk the Emberveil install ancestry, but add only specifically named data
+    # directories. Adding each ancestor itself could recursively scan a drive or
+    # the user's whole profile when a custom installation is near its root.
     $current = Get-NormalizedPath $AddOnsPath
     for ($i = 0; $i -lt 10 -and $current; $i++) {
-        Get-UniqueExistingDirectory -List $roots -Seen $seen -Path $current
         Get-UniqueExistingDirectory -List $roots -Seen $seen -Path (Join-Path $current 'WTF')
         Get-UniqueExistingDirectory -List $roots -Seen $seen -Path (Join-Path $current 'Saved')
         Get-UniqueExistingDirectory -List $roots -Seen $seen -Path (Join-Path $current 'SavedVariables')
@@ -140,20 +149,20 @@ function Get-SavedVariablesSearchRoots {
         $current = $parent
     }
 
-    # 2) Unreal/launcher user-data locations. Emberveil is not required to use
-    # Blizzard's classic WTF placement, so search the normal Windows data roots
-    # where Unreal projects and launchers persist user state.
-    $candidates = @(
-        # Confirmed Emberveil layout:
-        # %LOCALAPPDATA%\Azeroth\Saved\Account\<ACCOUNT>\SavedVariables
-        (Join-Path $env:LOCALAPPDATA 'Azeroth\Saved\Account'),
-        (Join-Path $env:LOCALAPPDATA 'Azeroth\Saved'),
-        $env:APPDATA,
-        (Join-Path $env:USERPROFILE 'Saved Games'),
-        (Join-Path $env:USERPROFILE 'Documents'),
-        # Expensive fallback last.
-        $env:LOCALAPPDATA
-    )
+    # Confirmed Emberveil layout:
+    # %LOCALAPPDATA%\Azeroth\Saved\Account\<ACCOUNT>\SavedVariables
+    $candidates = @((Join-Path $env:LOCALAPPDATA 'Azeroth\Saved\Account'))
+
+    # Broader profile discovery is support-only and requires an explicit switch.
+    # It is intentionally never used by normal installation or release tests.
+    if ($AllowBroadSavedVariablesScan) {
+        $candidates += @(
+            (Join-Path $env:LOCALAPPDATA 'Azeroth\Saved'),
+            $env:APPDATA,
+            (Join-Path $env:USERPROFILE 'Saved Games'),
+            (Join-Path $env:USERPROFILE 'Documents')
+        )
+    }
 
     foreach ($candidate in $candidates) {
         Get-UniqueExistingDirectory -List $roots -Seen $seen -Path $candidate
@@ -214,36 +223,6 @@ function Find-PfQuestSavedVariableFiles {
     $excludedBackupRoot = (Get-NormalizedPath $BackupRoot).ToLowerInvariant()
 
     Write-InstallLog ("SavedVariables search roots: " + $roots.Count) DarkGray
-
-    # Fastest path for the confirmed Emberveil account layout.
-    $accountRoot = Join-Path $env:LOCALAPPDATA 'Azeroth\Saved\Account'
-    if (Test-Path -LiteralPath $accountRoot -PathType Container) {
-        # Keep this deliberately simple for Windows PowerShell 5.1. The beta1.16
-        # package accidentally closed this foreach with `})`, which made the
-        # entire installer fail at parse time before any installation work ran.
-        $accountDirs = @(Get-ChildItem -LiteralPath $accountRoot -Directory -ErrorAction SilentlyContinue)
-        foreach ($accountDir in $accountDirs) {
-            $savedDir = Join-Path $accountDir.FullName 'SavedVariables'
-            if (-not (Test-Path -LiteralPath $savedDir -PathType Container)) { continue }
-
-            Write-InstallLog ("  priority scan: " + $savedDir) DarkGray
-            foreach ($name in @('pfQuest.lua', 'pfQuest.lua.bak')) {
-                $candidate = Join-Path $savedDir $name
-                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                    $file = Get-Item -LiteralPath $candidate
-                    $full = Get-NormalizedPath $file.FullName
-                    $key = $full.ToLowerInvariant()
-                    if (-not $seenFiles.ContainsKey($key) -and
-                        (Test-PfQuestSavedVariableCandidate -File $file)) {
-                        $seenFiles[$key] = $true
-                        $files.Add($file)
-                    }
-                }
-            }
-        }
-    }
-
-    if ($files.Count -gt 0) { return $files }
 
     foreach ($root in $roots) {
         Write-InstallLog ("  scanning: " + $root) DarkGray
@@ -308,7 +287,7 @@ function Repair-PfQuestSavedVariables {
         $diag = Join-Path $LogRoot ("savedvars-search-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
         $roots = @(Get-SavedVariablesSearchRoots -AddOnsPath $AddOnsPath)
         @(
-            'Questie Emberveil SavedVariables search diagnostic'
+            'KoQuest SavedVariables search diagnostic'
             ('Time: ' + (Get-Date).ToString('s'))
             ('AddOns: ' + $AddOnsPath)
             ''
@@ -448,7 +427,7 @@ function Remove-PrivateDirectory {
 }
 
 try {
-    Write-InstallLog "Questie Emberveil installer $Version" Cyan
+    Write-InstallLog "KoQuest installer $Version" Cyan
     Write-InstallLog "No network access, telemetry, or remote downloads are used by this installer."
 
     $manifest = @(Read-PayloadManifest)
@@ -488,10 +467,14 @@ try {
     if ($target -ieq $SourceRoot) { throw 'Source and installation target resolve to the same path.' }
 
     Write-InstallLog "Target: $target" Cyan
-    Write-InstallLog 'Checking pfQuest SavedVariables for the beta1.15 tracking-path serialization crash...' Cyan
-    $savedVarRecovery = Repair-PfQuestSavedVariables -AddOnsPath $addOns
-    if ($savedVarRecovery.Found -eq 0) {
-        Write-InstallLog 'NOTE: Addon installation will continue, but no legacy SavedVariables file was located.' Yellow
+    if ($SkipSavedVariablesRepair) {
+        Write-InstallLog 'SavedVariables recovery skipped by explicit request.' Yellow
+    } else {
+        Write-InstallLog 'Checking pfQuest SavedVariables for the beta1.15 tracking-path serialization crash...' Cyan
+        $savedVarRecovery = Repair-PfQuestSavedVariables -AddOnsPath $addOns
+        if ($savedVarRecovery.Found -eq 0) {
+            Write-InstallLog 'NOTE: Addon installation will continue, but no legacy SavedVariables file was located.' Yellow
+        }
     }
     $token = [guid]::NewGuid().ToString('N')
     $stageRoot = Join-Path $addOns ".qev-stage-$token"
@@ -538,7 +521,7 @@ try {
     }
 
     if (-not $installed) { throw 'Installation did not reach the verified state.' }
-    Write-InstallLog "DONE: Questie Emberveil $Version installed and verified." Green
+    Write-InstallLog "DONE: KoQuest $Version installed and verified." Green
     Write-InstallLog 'Restart Emberveil completely, then enable pfQuest in the AddOns list.' Green
     Write-InstallLog "Log: $LogPath"
     exit 0

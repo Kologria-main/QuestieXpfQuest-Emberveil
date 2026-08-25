@@ -101,6 +101,8 @@ pfQuest_defconfig = {
     default = "0", type = "checkbox", config = "showclustermini" },
   { text = L["Display Available Quest Givers"],
     default = "1", type = "checkbox", config = "allquestgivers" },
+  { text = L["Allow Best-Effort Quest Givers (May Include Completed Quests)"],
+    default = "1", type = "checkbox", config = "unverifiedquestgivers" },
   { text = L["Display Current Quest Givers"],
     default = "1", type = "checkbox", config = "currentquestgivers" },
   { text = L["Display Low Level Quest Givers"],
@@ -281,6 +283,17 @@ pfUI.api.SkinButton(pfQuestConfig.save)
 
 function pfQuestConfig:LoadConfig()
   if not pfQuest_config then pfQuest_config = {} end
+
+  -- beta1.19 changes the default from fail-closed to useful best effort.
+  -- Emberveil exposes no character-wide completion getter, so the database and
+  -- KoQuest's locally recorded completion history are the only passive source
+  -- for quest-giver markers. Apply the new default once to existing installs;
+  -- players can still turn the clearly labelled setting off afterwards.
+  if pfQuest_config["availabilitydefaultv2"] ~= "1" then
+    pfQuest_config["unverifiedquestgivers"] = "1"
+    pfQuest_config["availabilitydefaultv2"] = "1"
+  end
+
   for id, data in pairs(pfQuest_defconfig) do
     if data.config and not pfQuest_config[data.config] then
       pfQuest_config[data.config] = data.default
@@ -530,7 +543,7 @@ function pfQuestConfig:ApplyEmberveilSettings(rebuild)
 
   if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
     DEFAULT_CHAT_FRAME:AddMessage(
-      "|cff33ffccQuestie EV:|r settings applied. They will persist on normal logout/exit.")
+      "|cff33ffccKoQuest:|r settings applied. They will persist on normal logout/exit.")
   end
 end
 

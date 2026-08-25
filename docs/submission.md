@@ -1,13 +1,13 @@
-# Emberveil addon submission
+# Emberveil addon update submission
 
-Use the current release—not a branch archive—for the download URL.
+Use the published GitHub Release asset—not a branch archive—and keep the source and download on the same public repository.
 
 ## Form values
 
 **Name**
 
 ```text
-Questie Emberveil
+KoQuest
 ```
 
 **Category**
@@ -25,33 +25,39 @@ https://github.com/Kologria-main/QuestieXpfQuest-Emberveil
 **Download**
 
 ```text
-https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases/download/v2.0.0-beta1.16/Questie_Emberveil_v2.0.0-beta1.16.zip
+https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases/download/v2.0.0-beta1.19/KoQuest_Emberveil_v2.0.0-beta1.19.zip
 ```
 
 **Short description**
 
 ```text
-Quest and objective markers for Emberveil's world map and minimap, powered by the pfQuest database and a crash-conscious Emberveil compatibility layer.
+Safe, localized quest and objective markers for Emberveil's world map and minimap, powered by the pfQuest database.
 ```
 
 **Full description**
 
 ```text
-Questie Emberveil brings pfQuest's quest database, tracker, searchable browser, verified quest-giver markers, turn-in markers, and active objective locations to the Emberveil client.
+KoQuest brings pfQuest's searchable quest database, tracker, quest-giver markers, turn-in markers, and active objective locations to the Emberveil client.
 
-The port uses a dedicated Emberveil map engine with verified current-zone coordinates, indoor parent-zone continuity, spatial minimap caching, adaptive low-FPS throttling, and strict three-state quest handling so failed quests are never shown as complete. Available quest starters are shown only when Emberveil provides authoritative character-wide completion history; otherwise active objectives and turn-ins remain visible while uncertain starters are hidden. When the client cannot provide a trustworthy quest state, coordinate, or floor context, the addon hides that marker instead of guessing.
+Correctness comes first. A quest is shown as ready to turn in only when the official quest-log state says it is complete. Available quest-giver markers are shown on both map surfaces using database eligibility, the active quest log, and KoQuest's recorded completion history. Emberveil currently exposes no verified character-wide completion getter, so the clearly labeled best-effort setting explains that a quest completed before KoQuest was installed can still appear and lets players disable unverified starters.
 
-The addon and installer are fully readable in the public repository. The installer is offline, verifies every bundled file with SHA-256, backs up the current pfQuest folder, installs transactionally, and rolls back on failure. The addon performs no downloads, telemetry, chat messages, or addon-channel broadcasts.
+The Emberveil compatibility layer handles localized runtime quest-title prefixes, collapsed quest-log sections, numeric race/class IDs, indoor parent-zone continuity, spatial minimap caching, and bounded rendering. Accepted objectives appear on both map surfaces; dense world maps retain the original hoverable pfQuest summary icons while the minimap keeps nearby individual spawn nodes. Russian, Simplified Chinese, and Traditional Chinese databases are included and coverage-checked against every base English lookup ID.
 
-Current limitation: party/raid interior minimap pins and the route arrow are disabled because the supplied Emberveil API does not expose trustworthy floor/facing data.
+The addon and installers are fully readable in the public repository. Windows and Linux/Wine/Proton installation is supported. Both installers are offline, verify the bundled addon with SHA-256, back up the current pfQuest folder, install transactionally, and roll back on failure. The addon performs no downloads, telemetry, chat messages, or addon-channel broadcasts.
+
+Current deliberate safeguards: party/raid interior minimap pins and the route arrow remain disabled because the supplied Emberveil API does not expose trustworthy floor/facing data.
 ```
 
 **Version**
 
 ```text
-2.0.0-beta1.16
+2.0.0-beta1.19
 ```
 
-Upload `assets/icon.png` as the icon. Do not upload fabricated in-game screenshots; screenshots should show the real addon running in Emberveil and are optional under the announced rules.
+## Files and final checks
 
-Before submitting, confirm that the repository is public, the tag and release are visible while logged out, the asset downloads from the same repository, the checksum matches `SHA256SUMS.txt`, and the icon is PNG/JPG/WebP under 10 MB.
+- Icon: `assets/icon.png` (PNG, under 10 MB).
+- Screenshots: use the real gallery images listed in `docs/submission-assets.md`; do not fabricate in-game evidence.
+- Confirm the repository and `v2.0.0-beta1.19` release are visible while logged out.
+- Confirm the download is the GitHub Release asset above and its SHA-256 matches `dist/SHA256SUMS.txt`.
+- Confirm the site displays the new version and does not keep the previously frozen beta1.15 asset.
