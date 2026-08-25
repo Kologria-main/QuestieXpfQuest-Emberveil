@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0-beta1.20 — 2026-08-25
+
+- Restore the small colored pfQuest objective circles to dense world maps. Every visible circle is a real hoverable/clickable pfQuest button with the original spawn, quest, progress, and drop-rate tooltip.
+- Keep the original route, cluster, quest-giver, turn-in, and player-marker icons unchanged; no decorative or non-interactive dot overlay is used.
+- Compact repeated locations for the same quest/spawn/item identity into a bounded 320-button world-map set. Visible circles stay on real database coordinates instead of synthetic averaged positions.
+- Cache the compacted world-map set by quest-node generation, so the dense-zone scan and grouping run only when the selected map or quest nodes change.
+- Extend `/koquest` diagnostics with raw/rendered world objective counts and the selected compaction grid.
+- Preserve the beta1.19 quest-state, completed-history, localization, Linux/Wine/Proton, and installer hardening unchanged.
+
 ## 2.0.0-beta1.19 — 2026-08-25
 
 - Enable database-matched available quest-giver markers by default on both the world map and minimap, filtered by eligibility, the active log, and KoQuest's recorded completion history.

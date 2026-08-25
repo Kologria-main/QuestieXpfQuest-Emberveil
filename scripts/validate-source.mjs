@@ -5,7 +5,7 @@ import luaparse from "luaparse";
 
 const repo = path.resolve(import.meta.dirname, "..");
 const addon = path.join(repo, "addon", "pfQuest");
-const expectedVersion = "2.0.0-beta1.19";
+const expectedVersion = "2.0.0-beta1.20";
 const failures = [];
 let parsedLua = 0;
 let totalFiles = 0;
@@ -201,7 +201,13 @@ const contracts = [
   [mapEngine.includes(`EV.minimapEnvironmentSource = "verified-outdoor-only"`), "measured outdoor-only minimap scale policy missing"],
   [mapEngine.includes(`function EV:CaptureMinimapPlayerPosition()`), "20 Hz minimap position fast path missing"],
   [mapEngine.includes(`pin.qevVisualKey ~= visualKey`), "minimap visual metadata cache missing"],
-  [mapEngine.includes(`local denseMode = totalNodes > 450`), "dense-zone world-map suppression missing"],
+  [mapEngine.includes(`local denseMode = totalNodes > 450`), "dense-zone world-map compaction missing"],
+  [mapEngine.includes(`WORLD_OBJECTIVE_PIN_BUDGET = 320`), "world-map objective pin budget missing"],
+  [mapEngine.includes(`function EV:GetWorldRenderEntries`), "hoverable world-map objective cache missing"],
+  [mapEngine.includes(`bucket.node[title] = meta`), "world-map objective tooltips are not preserved"],
+  [mapEngine.includes(`sourceKey = entry.key`), "world-map compaction does not preserve a real source coordinate"],
+  [!mapEngine.includes(`bucket.xTotal / bucket.count`), "world-map objectives still use synthetic averaged coordinates"],
+  [mapEngine.includes(`pfMap:BuildNode("pfMapPin" .. i, WorldMapButton)`), "world-map objectives are not real hoverable pfMap buttons"],
   [mapEngine.includes(`function EV:EnsureActiveQuestNodes`), "active quest-node self-heal missing"],
   [quest.includes(`QuestieEV:EnsureActiveQuestNodes("queue-drained")`), "quest queue does not audit active nodes"],
   [mapEngine.includes(`parentSource = "sticky-parent"`), "indoor parent-zone continuity is missing"],

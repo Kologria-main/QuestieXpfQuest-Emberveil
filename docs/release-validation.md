@@ -1,4 +1,4 @@
-# Release validation: 2.0.0-beta1.19
+# Release validation: 2.0.0-beta1.20
 
 Validation date: 2026-08-25
 
@@ -6,10 +6,12 @@ Target: Emberveil live client 1.12.1, launcher build/revision 2286, Windows x64
 
 ## Release result
 
-`2.0.0-beta1.19` passed the repository's source, quest-state, package,
+`2.0.0-beta1.20` passed the repository's source, quest-state, package,
 installer, localization-coverage, and payload-integrity gates. The exact addon
 payload was then installed into the path-qualified Emberveil client and exercised
-without accepting, abandoning, failing, or turning in a quest.
+without abandoning, failing, or turning in a quest. The beta1.20-specific live
+pass covered dense world-map rendering, objective tooltips, zone/continent map
+transitions, minimap recovery, and steady-state performance.
 
 The tested executable was:
 
@@ -49,35 +51,42 @@ No similarly named WoW client or unrelated game process was used for this test.
   complete SavedVariables file and prior addon folder were backed up first; no
   unrelated settings were deleted.
 - The AddOn List displayed `KoQuest (Emberveil, pfQuest Engine)` enabled.
-- The client entered the world on the level 11 rogue Kologria in Stormwind without
+- The client entered the world on the level 11 rogue Kologria at Sentinel Hill,
+  Westfall, without
   a visible Lua error, crash, frozen UI, or startup loop.
-- `/koquest` reported:
+- `/koquest` reported a complete quest-log snapshot, local best-effort completion
+  history, available quest givers enabled, 1,009 cached Westfall nodes, and:
 
   ```text
   questState ready=true sync=local-history-no-server-api
   availability=local-best-effort historyAuthoritative=false availableGivers=true
-  logSnapshot=complete completed=29 history=29 liveQuestlog=9
-  activeNodes covered=9/9 missing= unresolvedAudits=0
-  render worldVisible=13 miniVisible=30
+  logSnapshot=complete completed=30 history=30 liveQuestlog=10
+  worldDense=true worldNodes=289/1009 suppressed=720
+  objectives=277/997 grid=6
   ```
 
 - Database-matched available quest-giver `!` markers were visible on both the
   Westfall world map and minimap. Known active and locally recorded completed
   quests remained filtered; the client exposes no verified API for discovering
   completions from before KoQuest was installed.
-- All nine active quests had objective-node coverage. Dense Westfall rendering
-  retained 13 original clickable/hoverable pfQuest summary nodes and suppressed
-  997 redundant individual world-map buttons. The minimap retained 30 nearby
-  individual nodes through its current-map spatial query.
-- No experimental raw-dot textures were present on the world map. This preserves
-  original icon tooltips and avoids hundreds of additional dense-map textures.
+- Dense Westfall rendering retained 12 original summary/giver icons and restored
+  277 small colored objective circles from 997 raw objective coordinates. Every
+  visible circle is a real pfQuest Button; no experimental raw-dot texture layer
+  is present.
+- Hovering a colored world-map circle in the final installed candidate displayed
+  the expected original tooltip: `Slark`, level `15`, unit, 90-minute respawn,
+  quest `Westfall Stew`, and `Murloc Eye: 0/3 30.84%`.
+- Compaction grouped only matching quest/spawn/item identities. Each displayed
+  circle uses a real source database coordinate, never an averaged or invented
+  position. The selected six-percent grid bounded the dense world-map pool at
+  289 total buttons.
 - The Westfall world map, minimap bridge, tracker startup, diagnostics, and a
   zone-to-continent-to-zone map transition remained responsive. Full minimap
-  pins returned immediately when the continent map closed.
-- The 20 Hz minimap projection reported a 0.05-second interval, 1,010 cached
-  Westfall nodes, and 52 candidates in the current spatial query. The diagnostic
-  rolling average was about 100 FPS; observed steady-state overlay values in the
-  tested Sentinel Hill interior returned to approximately 106-113 FPS.
+  pins returned on the first scheduled projection after the continent map closed.
+- The 20 Hz minimap projection reported a 0.05-second interval, 1,009 cached
+  Westfall nodes, and 80 candidates in the sampled spatial query. The diagnostic
+  rolling average was about 101 FPS; observed steady-state overlay values at
+  Sentinel Hill returned to approximately 104-113 FPS.
 
 ## Scope boundary
 
