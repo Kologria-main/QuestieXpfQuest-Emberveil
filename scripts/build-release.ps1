@@ -1,16 +1,16 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '2.0.0-beta1.15'
+    [string]$Version = '2.0.0-beta1.19'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $dist = Join-Path $repo 'dist'
-$packageName = "Questie_Emberveil_v$Version"
+$packageName = "KoQuest_Emberveil_v$Version"
 $zipPath = Join-Path $dist "$packageName.zip"
 $checksumPath = Join-Path $dist 'SHA256SUMS.txt'
-$fixedTime = [DateTimeOffset]::Parse('2026-08-21T00:00:00Z')
+$fixedTime = [DateTimeOffset]::Parse('2026-08-25T00:00:00Z')
 
 & (Join-Path $PSScriptRoot 'update-payload-manifest.ps1')
 & (Join-Path $PSScriptRoot 'validate-release.ps1') -SkipInstallerTests
@@ -20,7 +20,8 @@ if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force 
 
 $rootFiles = @(
     'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md',
-    'RELEASE_NOTES.md', 'INSTALL_QUESTIE_EMBERVEIL.cmd'
+    'RELEASE_NOTES.md', 'INSTALL_KOQUEST.cmd', 'INSTALL_KOQUEST_LINUX.sh',
+    'INSTALL_QUESTIE_EMBERVEIL.cmd'
 )
 $trees = @('addon', 'installer', 'docs', 'assets')
 $items = @()
@@ -71,6 +72,8 @@ try {
 
     foreach ($required in @(
         "$packageName/README.md",
+        "$packageName/INSTALL_KOQUEST.cmd",
+        "$packageName/INSTALL_KOQUEST_LINUX.sh",
         "$packageName/INSTALL_QUESTIE_EMBERVEIL.cmd",
         "$packageName/installer/payload-manifest.sha256",
         "$packageName/addon/pfQuest/pfQuest.toc"

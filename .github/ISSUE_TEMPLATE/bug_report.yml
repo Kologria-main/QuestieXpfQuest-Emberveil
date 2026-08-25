@@ -6,14 +6,28 @@ body:
   - type: input
     id: version
     attributes:
-      label: Questie Emberveil version
-      placeholder: 2.0.0-beta1.15
+      label: KoQuest version
+      placeholder: 2.0.0-beta1.19
     validations:
       required: true
   - type: input
     id: client
     attributes:
       label: Emberveil client/build
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Windows, Linux/Wine, Linux/Proton, Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: locale
+    attributes:
+      label: Client language
+      options: [English (enUS), Russian (ruRU), Chinese Simplified (zhCN), Chinese Traditional (zhTW), Other]
     validations:
       required: true
   - type: textarea
@@ -43,7 +57,7 @@ body:
   - type: textarea
     id: diagnostics
     attributes:
-      label: /qev diagnostics
+      label: /koquest diagnostics
       render: text
     validations:
       required: true

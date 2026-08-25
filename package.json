@@ -1,8 +1,8 @@
 {
-  "name": "questie-emberveil-release-tools",
+  "name": "koquest-emberveil-release-tools",
   "private": true,
-  "version": "2.0.0-beta1.18",
-  "description": "Offline validation tools for the Questie Emberveil addon release.",
+  "version": "2.0.0-beta1.19",
+  "description": "Offline validation tools for the KoQuest Emberveil addon release.",
   "packageManager": "pnpm@11.19.0",
   "scripts": {
     "validate": "node scripts/validate-source.mjs && fengari tests/quest-state.lua",

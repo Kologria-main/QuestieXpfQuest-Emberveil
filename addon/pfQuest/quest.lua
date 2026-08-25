@@ -254,6 +254,9 @@ pfQuest:SetScript("OnUpdate", function()
   -- every kill/loot update.
   if tsize(this.queue) == 0 then
     this.updateQuestLog = true
+    if QuestieEV and QuestieEV.EnsureActiveQuestNodes then
+      QuestieEV:EnsureActiveQuestNodes("queue-drained")
+    end
     if pfQuest.questGiverDirty then
       this.updateQuestGivers = true
       this.updateQuestGiversAt = GetTime() + .65
@@ -268,8 +271,9 @@ function pfQuest:UpdateQuestlog()
   pfQuest.questlog_tmp = pfQuest.questlog_tmp or questlog_flip
 
   local numEntries = 0
+  local snapshotComplete = true
   if QuestieEV and QuestieEV.GetQuestLogCounts then
-    numEntries = QuestieEV:GetQuestLogCounts()
+    numEntries, _, snapshotComplete = QuestieEV:GetQuestLogCounts()
   elseif type(GetNumQuestLogEntries) == "function" then
     numEntries = tonumber(GetNumQuestLogEntries()) or 0
   end
@@ -336,9 +340,25 @@ function pfQuest:UpdateQuestlog()
     end
   end
 
-  -- quest removal events
+  -- A collapsed header makes GetNumQuestLogEntries expose only visible rows.
+  -- Preserve hidden quests and never turn their temporary absence into REMOVE
+  -- events, completion history, or deleted map nodes.
+  if snapshotComplete == false then
+    if QuestieEV and QuestieEV.PreserveHiddenQuestLog then
+      QuestieEV:PreserveHiddenQuestLog(
+        pfQuest.questlog, pfQuest.questlog_tmp, snapshotComplete)
+    else
+      for questid, data in pairs(pfQuest.questlog) do
+        if not pfQuest.questlog_tmp[questid] then
+          pfQuest.questlog_tmp[questid] = data
+        end
+      end
+    end
+  end
+
+  -- quest removal events (only when every log row is visible)
   for questid, data in pairs(pfQuest.questlog) do
-    if not pfQuest.questlog_tmp[questid] then
+    if snapshotComplete ~= false and not pfQuest.questlog_tmp[questid] then
       table.insert(pfQuest.queue, { data.title, questid, nil, "REMOVE", data.state })
       change = true
     end

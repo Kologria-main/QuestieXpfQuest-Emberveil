@@ -6,12 +6,16 @@
 - **Tooltip item hyperlinks:** The native hyperlink bridge is not called. Item details use safe `GetItemInfo` text when available.
 - **Completed-quest server API:** `QueryQuestsCompleted` and
   `GetQuestsCompleted` are feature-detected. If unavailable or throttled, local
-  history is enough to render active objectives and turn-ins but cannot prove
-  what the character completed before installing the addon. Automatic
-  available quest-giver markers are therefore hidden rather than risking an
-  already-completed quest on the world map or minimap. `/qev` reports
-  `historyAuthoritative=false` and `availableGivers=false` in this mode.
+  history is enough to hide completions observed by KoQuest but cannot prove
+  what the character completed before installing the addon. Database-matched
+  available quest-giver markers are enabled by default so quests that can be
+  picked up remain useful on both map surfaces. `/koquest` then reports
+  `availability=local-best-effort`, `historyAuthoritative=false`, and
+  `availableGivers=true`. The clearly labeled setting can disable those
+  unverified starters; in the default mode, completed pre-install quests may
+  appear because the client provides no passive way to identify them.
 - **Database coverage:** pfQuest's database can differ from custom Emberveil content or altered spawn data. Unknown or custom quests may have incomplete markers until the database is updated.
-- **Future client changes:** This release is validated against the supplied Emberveil API documentation dated 2026-08-19. A later client can change behavior even when function names remain the same.
+- **Localized client runtime:** ruRU, zhCN, and zhTW database coverage and title normalization are tested offline. Final font rendering, native `GetLocale()` behavior, and server-specific custom quest text still require target-client smoke tests on each locale.
+- **Future client changes:** This release is validated against the supplied Emberveil API documentation and Thomas's UnrealRuntimeCompat runtime database supplied on 2026-08-25. A later client can change behavior even when function names remain the same.
 
-These are not silently guessed around. The addon prefers missing markers to confident-looking wrong information.
+These are not silently guessed around. Active and completed state is fail-closed; the one database-based available-quest limitation is labeled explicitly.

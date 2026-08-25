@@ -1,5 +1,5 @@
--- Questie Emberveil / pfQuest map engine
--- v2.0.0-beta1.18
+-- KoQuest for Emberveil / pfQuest map engine
+-- v2.0.0-beta1.19
 --
 -- Design:
 --   * pfQuest database + quest parser
@@ -45,23 +45,21 @@ EV.mapContextPrimeCount = 0
 EV.mapContextPrimeLastResult = "not-run"
 EV.mapContextPrimeLastReason = nil
 EV.mapContextPrimeBusy = false
+EV.mapContextBootstrapAttempted = false
+EV.mapContextProbeAttempted = false
+EV.mapContextProbe = nil
+EV.mapContextProbeCount = 0
 EV.location = EV.location or {}
 EV.positionFreshSeconds = 2.0
 
--- pfQuest's pinned minimap scale tables use:
---   0 = indoor scale
---   1 = outdoor scale
--- Azeroth DOES NOT register the Vanilla minimapZoom/minimapInsideZoom CVars;
--- GetCVar() returns "0" for those unknown names. Never use those CVars here.
-local qevSavedMinimapEnvironment = type(pfQuest_config) == "table"
-  and tonumber(pfQuest_config["qev_minimap_environment"]) or nil
-if qevSavedMinimapEnvironment ~= 0 and qevSavedMinimapEnvironment ~= 1 then
-  qevSavedMinimapEnvironment = 1
-end
-EV.minimapEnvironment = qevSavedMinimapEnvironment
-EV.minimapEnvironmentSource = type(pfQuest_config) == "table"
-  and pfQuest_config["qev_minimap_environment"] ~= nil
-  and "saved" or "default-outdoor"
+-- Thomas's measured Emberveil runtime evidence confirms the Vanilla outdoor
+-- span at zoom 0 keeps a world-anchored marker glued while walking. The client
+-- exposes neither IsIndoors nor IsOutdoors, and ZONE_CHANGED_INDOORS does not
+-- prove that the minimap switched to an indoor scale. Therefore only the
+-- verified outdoor row is safe; selecting the unmeasurable indoor row causes
+-- the exact drift seen outdoors at Sentinel Tower.
+EV.minimapEnvironment = 1
+EV.minimapEnvironmentSource = "verified-outdoor-only"
 EV.minimapPolicy = "uninitialized"
 EV.minimapLastEnvironmentEventAt = nil
 EV.minimapLastAuthoritativeEnvironmentAt = nil
@@ -85,10 +83,10 @@ EV.perf = EV.perf or {
   miniCacheBuilds = 0,
   miniCacheGeneration = 0,
   miniLastCacheReason = "init",
-  miniInterval = 0.10,
-  miniBaseInterval = 0.10,
-  miniTransitionInterval = 0.25,
-  miniLowFpsInterval = 0.20,
+  miniInterval = 0.05,
+  miniBaseInterval = 0.05,
+  miniTransitionInterval = 0.05,
+  miniLowFpsInterval = 0.05,
   fpsNow = 0,
   fpsAvg = 0,
   fpsMin = nil,
@@ -97,6 +95,10 @@ EV.perf = EV.perf or {
   transitionUntil = nil,
   worldRuns = 0,
   worldSkips = 0,
+  worldNodeTotal = 0,
+  worldNodeRendered = 0,
+  worldNodeSuppressed = 0,
+  worldDenseMode = false,
 }
 EV.minimapNextAt = nil
 EV.minimapForceNext = true
@@ -104,20 +106,21 @@ EV.minimapNodeCache = EV.minimapNodeCache or {
   mapID = nil,
   entries = {},
   grid = {},
-  cellSize = 5,
+  cellSize = 2.5,
   dirty = true,
   reason = "init",
   generation = 0,
 }
 EV.worldMapNextAt = nil
 EV.worldMapForceNext = true
+EV.worldMapWasShown = false
 EV.locationRefreshSeconds = 0.25
 
 local function chat(msg)
   if EV.Chat then
     EV.Chat(msg)
   elseif DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccQuestie EV:|r " .. tostring(msg))
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccKoQuest:|r " .. tostring(msg))
   end
 end
 
@@ -181,28 +184,26 @@ function EV:SampleFramerate(now)
   end
   if not perf.fpsMin or fps < perf.fpsMin then perf.fpsMin = fps end
 
-  -- GetFramerate() is a documented rolling engine FPS average. When the client
-  -- is already under load, reduce Questie's heavy minimap cadence instead of
-  -- competing for additional frame time.
-  local interval = perf.miniBaseInterval or 0.10
-  if fps < 30 then
-    interval = 0.25
-  elseif fps < 45 then
-    interval = 0.20
-  elseif fps < 60 then
-    interval = 0.14
-  end
+  -- Keep projection at the measured 20 Hz cadence. Slowing to 4-7 Hz under
+  -- load made pins visibly lag behind the moving minimap texture. The hot path
+  -- below now caches visual metadata, so a normal movement tick only performs
+  -- bounded spatial math and point updates.
+  perf.miniInterval = perf.miniBaseInterval or 0.05
+end
 
-  if perf.transitionUntil and now < perf.transitionUntil then
-    interval = math.max(interval, perf.miniTransitionInterval or 0.16)
-  end
-
-  perf.miniInterval = interval
+function EV:ResetFramerateStats(reason)
+  local perf = self.perf
+  perf.fpsNow = 0
+  perf.fpsAvg = 0
+  perf.fpsMin = nil
+  perf.fpsSamples = 0
+  perf.fpsNextAt = GetTime() + 1.0
+  perf.fpsResetReason = reason or "runtime-ready"
 end
 
 function EV:MarkMinimapNodeCacheDirty(reason)
   self.minimapNodeCache = self.minimapNodeCache or {
-    mapID = nil, entries = {}, grid = {}, cellSize = 5,
+    mapID = nil, entries = {}, grid = {}, cellSize = 2.5,
     dirty = true, reason = "init", generation = 0,
   }
   self.minimapNodeCache.dirty = true
@@ -233,7 +234,7 @@ function EV:GetMinimapNodeCache(mapID)
   local cache = self.minimapNodeCache
   if not cache then
     cache = {
-      mapID = nil, entries = {}, grid = {}, cellSize = 5,
+      mapID = nil, entries = {}, grid = {}, cellSize = 2.5,
       dirty = true, reason = "init", generation = 0,
     }
     self.minimapNodeCache = cache
@@ -243,7 +244,7 @@ function EV:GetMinimapNodeCache(mapID)
 
   local entries = {}
   local grid = {}
-  local cellSize = cache.cellSize or 5
+  local cellSize = cache.cellSize or 2.5
 
   if pfMap and type(pfMap.nodes) == "table" and mapID then
     for addon, data in pairs(pfMap.nodes) do
@@ -253,7 +254,13 @@ function EV:GetMinimapNodeCache(mapID)
           local _, _, sx, sy = string.find(coords, "(.*)|(.*)")
           local x, y = tonumber(sx), tonumber(sy)
           if x and y then
-            local entry = { addon = addon, node = node, x = x, y = y }
+            local entry = {
+              addon = addon,
+              node = node,
+              x = x,
+              y = y,
+              key = tostring(addon) .. "|" .. tostring(mapID) .. "|" .. tostring(coords),
+            }
             entries[table.getn(entries) + 1] = entry
 
             local cx = math.floor(x / cellSize)
@@ -402,6 +409,40 @@ function EV:IsPlayerPositionFresh()
   return age >= 0 and age <= (self.positionFreshSeconds or 2.0)
 end
 
+-- Fast path used by the minimap projector. The world map is hidden here, so
+-- Emberveil's current map context is the player's verified parent zone. This
+-- mirrors Thomas's successful 0.05-second world-anchor probe without repeating
+-- the full zone/map discovery chain on every movement sample.
+function EV:CaptureMinimapPlayerPosition()
+  if self:IsWorldMapShown() then return false end
+
+  local loc = self:RefreshLocationContext()
+  local mapID = loc.parentMapID or self:GetMapIDByZoneName(loc.realZone)
+  if not mapID then
+    self.player.positionSource = "minimap-zone-unmapped"
+    return false
+  end
+
+  local x, y = QuestieEV_SafeGetPlayerMapPosition("player")
+  if not (Num(x) and Num(y) and x > 0 and x <= 1 and y > 0 and y <= 1) then
+    self.player.positionSource = "minimap-position-unavailable"
+    return false
+  end
+
+  if self.player.mapID and self.player.mapID ~= mapID then
+    self:MarkMinimapNodeCacheDirty("fast-position-map-change")
+  end
+
+  self.player.mapID = mapID
+  self.player.zone = loc.realZone
+  self.player.x = x
+  self.player.y = y
+  self.player.updated = GetTime()
+  self.player.positionSource = "minimap-fast-zone"
+  self.player.contextKey = tostring(mapID) .. "|" .. tostring(loc.realZone)
+  return true
+end
+
 -- =========================================================================
 -- Minimap indoor/outdoor scale tracking
 -- =========================================================================
@@ -421,7 +462,7 @@ end
 -- The last known state is persisted through /reload.
 function EV:PersistMinimapEnvironment()
   if type(pfQuest_config) == "table" then
-    pfQuest_config["qev_minimap_environment"] = tostring(self.minimapEnvironment == 0 and 0 or 1)
+    pfQuest_config["qev_minimap_environment"] = "1"
   end
 end
 
@@ -435,12 +476,11 @@ function EV:ScheduleMinimapProjection(delay, reason)
 end
 
 function EV:SetMinimapEnvironment(environment, source, authoritative)
-  environment = tonumber(environment)
-  if environment ~= 0 and environment ~= 1 then return false end
-
-  local changed = self.minimapEnvironment ~= environment
-  self.minimapEnvironment = environment
-  self.minimapEnvironmentSource = source or "event"
+  -- Indoor scale selection is not observable on Emberveil. Preserve the only
+  -- measured row instead of treating a zone event name as scale evidence.
+  local changed = self.minimapEnvironment ~= 1
+  self.minimapEnvironment = 1
+  self.minimapEnvironmentSource = "verified-outdoor-only"
   self.minimapLastEnvironmentEventAt = GetTime()
   if authoritative then
     self.minimapLastAuthoritativeEnvironmentAt = self.minimapLastEnvironmentEventAt
@@ -455,13 +495,9 @@ function EV:SetMinimapEnvironment(environment, source, authoritative)
 end
 
 function EV:GetMinimapEnvironment()
-  local env = tonumber(self.minimapEnvironment)
-  if env ~= 0 and env ~= 1 then
-    env = 1
-    self.minimapEnvironment = env
-    self.minimapEnvironmentSource = "default-outdoor"
-  end
-  return env
+  self.minimapEnvironment = 1
+  self.minimapEnvironmentSource = "verified-outdoor-only"
+  return 1
 end
 
 function EV:GetMapIDByZoneName(name)
@@ -531,8 +567,186 @@ function EV:IsWorldMapShown()
   return ok and shown and true or false
 end
 
+-- Emberveil sometimes returns nil from both parent-zone APIs after /reload and
+-- leaves the mapping subsystem at the same 0/0/nil signature as a genuine
+-- world view. SetMapToCurrentZone normally resolves that cold state, but the
+-- live Sentinel Tower case proved it can also be a no-op when the parent text
+-- itself is missing. In that narrow, proven-outdoor state, probe the client's
+-- own concrete zone views while the world map is hidden. A candidate is
+-- accepted only when the selected cid/mid maps to a known pfQuest zone AND the
+-- native player projection is non-zero on that exact view. No subzone-name
+-- guessing is involved.
+function EV:BeginHiddenZoneProbe(reason)
+  if self.mapContextProbe or self.mapContextProbeAttempted then return false end
+  if self:IsWorldMapShown() then return false end
+
+  local loc = self:RefreshLocationContext(true)
+  if loc.inInstance ~= false then
+    self.mapContextPrimeLastResult =
+      "zone-probe-blocked-instance:" .. tostring(loc.instanceType)
+    return false
+  end
+
+  local raw = self._rawSetMapZoom
+  if type(raw) ~= "function" or type(GetMapZones) ~= "function" then
+    self.mapContextPrimeLastResult = "zone-probe-api-missing"
+    return false
+  end
+
+  local continentCount = 2
+  if type(GetMapContinents) == "function" then
+    local values = { pcall(GetMapContinents) }
+    if values[1] then
+      table.remove(values, 1)
+      if table.getn(values) > 0 then continentCount = table.getn(values) end
+    end
+  end
+
+  local candidates = {}
+  self.mapContextProbe = {
+    candidates = candidates,
+    index = 1,
+    nextAt = GetTime(),
+    reason = reason or "unknown",
+  }
+  self.mapContextProbeAttempted = true
+  self.mapContextPrimeBusy = true
+
+  for cid = 1, continentCount do
+    local okZoom = pcall(raw, cid)
+    if okZoom then
+      local zones = { pcall(GetMapZones, cid) }
+      if zones[1] then
+        table.remove(zones, 1)
+        self.mapZoneCache[cid] = zones
+        for mid, name in pairs(zones) do
+          local mapID = self:GetMapIDByZoneName(name)
+          if type(mid) == "number" and mapID then
+            candidates[table.getn(candidates) + 1] = {
+              cid = cid,
+              mid = mid,
+              name = name,
+              mapID = mapID,
+              nodeScore = self:CountNodesForMap(mapID),
+            }
+          end
+        end
+      end
+    end
+  end
+
+  -- Active-quest zones are overwhelmingly the most likely current maps and
+  -- are already available by the time this post-startup recovery runs. Probe
+  -- them first, while preserving the exact coordinate-verification gate. This
+  -- turns Westfall's cold start from 42 native map switches into one and avoids
+  -- a burst of unnecessary map loads; characters with no nodes still receive
+  -- the complete fallback scan.
+  table.sort(candidates, function(a, b)
+    local aScore = tonumber(a.nodeScore) or 0
+    local bScore = tonumber(b.nodeScore) or 0
+    if aScore ~= bScore then return aScore > bScore end
+    if a.cid ~= b.cid then return a.cid < b.cid end
+    return a.mid < b.mid
+  end)
+
+  self.mapContextPrimeBusy = false
+  if table.getn(candidates) == 0 then
+    self.mapContextProbe = nil
+    self.mapContextPrimeLastResult = "zone-probe-no-candidates"
+    return false
+  end
+
+  self.mapContextPrimeLastResult =
+    "zone-probe-running:" .. tostring(table.getn(candidates))
+  self.mapContextPrimeLastReason = reason or "unknown"
+  return true
+end
+
+function EV:ProcessHiddenZoneProbe(limit)
+  local probe = self.mapContextProbe
+  if not probe then return false end
+
+  if self:IsWorldMapShown() then
+    -- The player always wins. Abort without changing their visible selection,
+    -- and allow a fresh hidden-only attempt after they close the map.
+    self.mapContextProbe = nil
+    self.mapContextProbeAttempted = false
+    self.mapContextPrimeLastResult = "zone-probe-aborted-world-map-visible"
+    return false
+  end
+
+  local raw = self._rawSetMapZoom
+  if type(raw) ~= "function" then
+    self.mapContextProbe = nil
+    self.mapContextPrimeLastResult = "zone-probe-api-missing"
+    return false
+  end
+
+  limit = tonumber(limit) or 2
+  local processed = 0
+  while processed < limit do
+    local candidate = probe.candidates[probe.index]
+    if not candidate then
+      self.mapContextProbe = nil
+      self.mapContextPrimeLastResult =
+        "zone-probe-no-match:" .. tostring(table.getn(probe.candidates))
+      -- Leave no unrelated zone selected after a failed scan.
+      self.mapContextPrimeBusy = true
+      pcall(raw, 0)
+      self.mapContextPrimeBusy = false
+      return false
+    end
+
+    probe.index = probe.index + 1
+    processed = processed + 1
+    self.mapContextPrimeBusy = true
+    local ok = pcall(raw, candidate.cid, candidate.mid)
+    self.mapContextPrimeBusy = false
+    self.mapContextProbeCount = (self.mapContextProbeCount or 0) + 1
+
+    if ok then
+      local selectedID, selectedName, selectedCID, selectedMID, _, viewKind =
+        self:GetSelectedMapID()
+      local x, y = QuestieEV_SafeGetPlayerMapPosition("player")
+      if selectedID == candidate.mapID
+          and selectedCID == candidate.cid
+          and selectedMID == candidate.mid
+          and (viewKind == "zone" or viewKind == "zone-fallback")
+          and Num(x) and Num(y) and x > 0 and x <= 1 and y > 0 and y <= 1 then
+        local zoneName = selectedName or candidate.name
+        self.location.parentZone = zoneName
+        self.location.parentMapID = candidate.mapID
+        self.location.realZone = zoneName
+        self.location.parentSource = "hidden-zone-probe"
+        self.location.updated = GetTime()
+
+        self.player.mapID = candidate.mapID
+        self.player.zone = zoneName
+        self.player.x = x
+        self.player.y = y
+        self.player.updated = GetTime()
+        self.player.positionSource = "hidden-zone-probe"
+        self.player.contextKey = tostring(candidate.mapID) .. "|" .. tostring(zoneName)
+
+        self.mapContextProbe = nil
+        self.mapContextPrimeLastResult =
+          "zone-probe-resolved:" .. tostring(zoneName)
+        self:MarkMinimapNodeCacheDirty("zone-probe-resolved")
+        self.worldMapForceNext = true
+        self.renderPrimeRequested = true
+        self:ResetFramerateStats("zone-probe-resolved")
+        return true
+      end
+    end
+  end
+
+  probe.nextAt = GetTime() + .10
+  return nil
+end
+
 function EV:PrimeHiddenPlayerMapContext(reason)
   local now = GetTime()
+  local urgentRestore = reason == "world-map-close"
 
   if self.mapContextPrimeBusy then
     self.mapContextPrimeLastResult = "busy"
@@ -551,7 +765,8 @@ function EV:PrimeHiddenPlayerMapContext(reason)
   end
 
   if self.mapContextPrimeCooldownUntil
-      and now < self.mapContextPrimeCooldownUntil then
+      and now < self.mapContextPrimeCooldownUntil
+      and not urgentRestore then
     self.mapContextPrimeLastResult = "cooldown"
     return false
   end
@@ -570,14 +785,31 @@ function EV:PrimeHiddenPlayerMapContext(reason)
   local realZone = loc.realZone
   local playerMapID = loc.parentMapID or self:GetMapIDByZoneName(realZone)
 
-  if not realZone or realZone == "" or not playerMapID then
+  -- Emberveil can return nil from both GetZoneText() and GetRealZoneText()
+  -- after /reload while still returning only a subzone such as
+  -- "Sentinel Tower". In that exact outdoor state there is no parent name to
+  -- resolve, but SetMapToCurrentZone() is the authoritative bootstrap API: it
+  -- selects the player's real zone without guessing that the subzone is a map.
+  -- Permit that bootstrap only when IsInInstance() explicitly proved false.
+  -- Unknown, dungeon, and raid contexts remain fail-closed.
+  local bootstrapUnresolvedOutdoor =
+    (not realZone or realZone == "" or not playerMapID)
+    and loc.inInstance == false
+
+  if (not realZone or realZone == "" or not playerMapID)
+      and not bootstrapUnresolvedOutdoor then
     self.mapContextPrimeLastResult = "player-zone-unresolved"
     return false
   end
 
   local selectedID, _, _, _, _, viewKind = self:GetSelectedMapID()
 
-  if selectedID == playerMapID
+  if bootstrapUnresolvedOutdoor and self.mapContextBootstrapAttempted then
+    return self:BeginHiddenZoneProbe(reason or "unresolved-outdoor")
+  end
+
+  if not bootstrapUnresolvedOutdoor
+      and selectedID == playerMapID
       and (viewKind == "zone" or viewKind == "zone-fallback") then
     self.mapContextPrimeLastResult = "already-current-zone"
     return true
@@ -592,7 +824,8 @@ function EV:PrimeHiddenPlayerMapContext(reason)
   -- Rate-limit BEFORE invoking the native bridge. If WORLD_MAP_UPDATE fires
   -- synchronously/re-entrantly, it cannot recurse into another native call.
   self.mapContextPrimeBusy = true
-  self.mapContextPrimeCooldownUntil = now + 2.0
+  self.mapContextPrimeCooldownUntil = now
+    + (urgentRestore and .20 or (bootstrapUnresolvedOutdoor and .20 or 2.0))
   self.mapContextPrimeLastReason = reason or "unknown"
 
   local ok = pcall(raw)
@@ -605,12 +838,17 @@ function EV:PrimeHiddenPlayerMapContext(reason)
   end
 
   self.mapContextPrimeCount = (self.mapContextPrimeCount or 0) + 1
-  self.mapContextPrimeLastResult =
-    "native-current-zone:" .. tostring(viewKind)
+  if bootstrapUnresolvedOutdoor then
+    self.mapContextBootstrapAttempted = true
+  end
+  self.mapContextPrimeLastResult = bootstrapUnresolvedOutdoor
+    and ("native-bootstrap-current-zone:" .. tostring(viewKind))
+    or ("native-current-zone:" .. tostring(viewKind))
 
   -- Let Azeroth finish the map switch, then recapture and prime the minimap.
   self.renderPrimeRequested = true
-  self.mapContextPrimeAt = now + .15
+  self.mapContextPrimeAt = now
+    + (urgentRestore and .05 or (bootstrapUnresolvedOutdoor and .25 or .15))
   return true
 end
 
@@ -677,6 +915,7 @@ function EV:ApplyKnownGoodConfig()
     showcluster = "1",
     minimapnodes = "1",
     allquestgivers = "1",
+    unverifiedquestgivers = "0",
     currentquestgivers = "1",
     worldmaptransp = "1.0",
     minimaptransp = "1.0",
@@ -709,9 +948,13 @@ function EV:BuildPlayerMarker()
   if self.playerMarker or not WorldMapButton then return end
 
   local f = CreateFrame("Frame", "QuestieEVWorldPlayerMarker", WorldMapButton)
-  f:SetWidth(22)
-  f:SetHeight(22)
-  f:SetFrameLevel(250)
+  -- This marker deliberately communicates position only. Emberveil exposes no
+  -- trustworthy facing value, so a directional arrow would show false data.
+  -- Keep the neutral ring large and above quest summaries so it cannot look
+  -- clipped/broken when several nodes overlap the player at a quest hub.
+  f:SetWidth(30)
+  f:SetHeight(30)
+  f:SetFrameLevel(500)
   f:Hide()
 
   local tex = f:CreateTexture(nil, "OVERLAY")
@@ -756,6 +999,42 @@ end
 -- =========================================================================
 -- WORLD MAP: direct pfQuest nodes, but map selection resolved by zone name.
 -- =========================================================================
+local function IsWorldSummaryNode(node)
+  if type(node) ~= "table" then return false end
+  for _, meta in pairs(node) do
+    if type(meta) == "table" and (meta.texture or meta.cluster) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Switching the native world map between zone and continent views can mutate
+-- the shared material behind already-cached minimap textures. UpdateNode's
+-- metadata cache then sees no logical change and leaves a hollow/black pin in
+-- place. Invalidate only on the map-close transition; the next bounded
+-- minimap pass recreates the intended texture and vertex colour once.
+function EV:InvalidateMinimapPinVisuals(reason)
+  if pfMap and type(pfMap.mpins) == "table" then
+    for _, pin in pairs(pfMap.mpins) do
+      if pin then
+        pin.qevVisualKey = nil
+        pin.qevX = nil
+        pin.qevY = nil
+        if pin.tex and pin.tex.SetTexture then pin.tex:SetTexture(nil) end
+        if pin.pic and pin.pic.Hide then pin.pic:Hide() end
+        if pin.hl and pin.hl.Hide then pin.hl:Hide() end
+        if pin.Hide then pin:Hide() end
+      end
+    end
+  end
+
+  self.minimapForceNext = true
+  self.minimapNextAt = nil
+  self.minimapVisualResetReason = reason or "unknown"
+  self.minimapVisualResetCount = (self.minimapVisualResetCount or 0) + 1
+end
+
 function pfMap:UpdateNodes()
   if type(pfQuest_config) ~= "table" then return end
   local evNow = GetTime()
@@ -778,6 +1057,13 @@ function pfMap:UpdateNodes()
   local color = pfQuest_config["spawncolors"] == "1" and "spawn" or "title"
   local map = EV:GetSelectedMapID()
   local i = 1
+  local totalNodes = EV:CountNodesForMap(map)
+  local denseMode = totalNodes > 450
+  local renderedNodes = 0
+  local suppressedNodes = 0
+
+  EV.perf.worldNodeTotal = totalNodes
+  EV.perf.worldDenseMode = denseMode
 
   if pfQuest.tracker and pfQuest.tracker.Reset then
     pfQuest.tracker.Reset()
@@ -790,6 +1076,13 @@ function pfMap:UpdateNodes()
     for addon, data in pairs(pfMap.nodes) do
       if data[map] then
         for coords, node in pairs(data[map]) do
+          -- Dense questing zones can contain 1,000+ individual spawn buttons.
+          -- Their generated cluster nodes represent the same objective areas
+          -- and remain clickable/tooltip-capable. Prefer those summaries on
+          -- the world map while the minimap keeps nearby individual spawns.
+          if denseMode and not IsWorldSummaryNode(node) then
+            suppressedNodes = suppressedNodes + 1
+          else
           if not pfMap.pins[i] then
             pfMap.pins[i] = pfMap:BuildNode("pfMapPin" .. i, WorldMapButton)
           end
@@ -839,6 +1132,8 @@ function pfMap:UpdateNodes()
             end
 
             i = i + 1
+            renderedNodes = renderedNodes + 1
+          end
           end
         end
       end
@@ -846,8 +1141,13 @@ function pfMap:UpdateNodes()
   end
 
   for j = i, table.getn(pfMap.pins) do
-    if pfMap.pins[j] then pfMap.pins[j]:Hide() end
+    if pfMap.pins[j] then
+      pfMap.pins[j]:Hide()
+    end
   end
+
+  EV.perf.worldNodeRendered = renderedNodes
+  EV.perf.worldNodeSuppressed = suppressedNodes
 
   EV:UpdatePlayerMarker()
 end
@@ -890,12 +1190,25 @@ function pfMap:UpdateMinimap()
     EV.minimapNextAt = nil
   end
 
-  if EV:IsWorldMapShown() and not EV.minimapForceNext then
+  if EV:IsWorldMapShown() then
+    EV.worldMapWasShown = true
     perf.miniMapHiddenSkips = (perf.miniMapHiddenSkips or 0) + 1
     return
   end
 
-  local interval = perf.miniInterval or perf.miniBaseInterval or .10
+  if EV.worldMapWasShown then
+    EV.worldMapWasShown = false
+    EV:InvalidateMinimapPinVisuals("world-map-close")
+    -- GetPlayerMapPosition is relative to the currently selected world-map
+    -- surface. If the player closed a continent or another zone, restore the
+    -- native current-zone context before sampling coordinates; otherwise
+    -- continent UVs get mislabeled as Westfall and only a few wrong pins show.
+    EV:PrimeHiddenPlayerMapContext("world-map-close")
+    EV:ScheduleMinimapProjection(.08, "world-map-close")
+    return
+  end
+
+  local interval = perf.miniInterval or perf.miniBaseInterval or .05
   if not EV.minimapForceNext and EV.minimapNextAt and now < EV.minimapNextAt then
     perf.miniSkips = (perf.miniSkips or 0) + 1
     return
@@ -917,6 +1230,10 @@ function pfMap:UpdateMinimap()
     return
   end
 
+  -- The verified runtime probe kept a world-anchored marker glued by sampling
+  -- the player every 0.05 seconds. Refresh the lightweight coordinate here;
+  -- the slower driver tick remains responsible for full map-context recovery.
+  EV:CaptureMinimapPlayerPosition()
   local p = EV.player
   if not p.mapID or not Num(p.x) or not Num(p.y) then
     EV:CapturePlayerPosition(false)
@@ -1014,15 +1331,18 @@ function pfMap:UpdateMinimap()
   -- Spatially query only grid cells that can intersect the minimap circle.
   -- This keeps dense zones from scanning hundreds/thousands of remote quest
   -- nodes every movement tick.
-  local cellSize = nodeCache.cellSize or 5
-  if not Num(cellSize) or cellSize <= 0 then cellSize = 5 end
+  local cellSize = nodeCache.cellSize or 2.5
+  if not Num(cellSize) or cellSize <= 0 then cellSize = 2.5 end
   local maxCell = math.floor(100 / cellSize)
   local maxDx = visibleRadius / math.abs(xDraw)
   local maxDy = visibleRadius / math.abs(yDraw)
-  local minCx = math.floor((xPlayer - maxDx) / cellSize) - 1
-  local maxCx = math.floor((xPlayer + maxDx) / cellSize) + 1
-  local minCy = math.floor((yPlayer - maxDy) / cellSize) - 1
-  local maxCy = math.floor((yPlayer + maxDy) / cellSize) + 1
+  -- The floor-bounded rectangle already contains every cell intersecting the
+  -- circle's axis-aligned bounds. The old extra one-cell border expanded a
+  -- Westfall query from 29 visible pins to 211 candidates at 20 Hz.
+  local minCx = math.floor((xPlayer - maxDx) / cellSize)
+  local maxCx = math.floor((xPlayer + maxDx) / cellSize)
+  local minCy = math.floor((yPlayer - maxDy) / cellSize)
+  local maxCy = math.floor((yPlayer + maxDy) / cellSize)
 
   if minCx < 0 then minCx = 0 end
   if minCy < 0 then minCy = 0 end
@@ -1048,7 +1368,22 @@ function pfMap:UpdateMinimap()
             end
 
             local pin = pfMap.mpins[i]
-            pfMap:UpdateNode(pin, entry.node, color, "minimap", distance)
+            local visualKey = tostring(entry.key)
+              .. "|" .. tostring(nodeCache.generation)
+              .. "|" .. tostring(color)
+              .. "|" .. tostring(pfQuest_config["cutoutminimap"])
+              .. "|" .. tostring(pfQuest_config["showclustermini"])
+              .. "|" .. tostring(pfQuest_config["showspawnmini"])
+
+            -- UpdateNode rebuilds highlight tables, textures, colors, layers,
+            -- scripts, and sizes. Those values are static while walking, so
+            -- refresh them only when a pin is rebound or the cache/config
+            -- generation changes. Movement then becomes cheap point math.
+            if pin.qevVisualKey ~= visualKey or pin.qevNode ~= entry.node then
+              pfMap:UpdateNode(pin, entry.node, color, "minimap", distance)
+              pin.qevVisualKey = visualKey
+              pin.qevNode = entry.node
+            end
             pin.hl:Hide()
 
             if pfQuest_config["showclustermini"] == "0" and pin.cluster then
@@ -1058,8 +1393,16 @@ function pfMap:UpdateMinimap()
                 and not pin.texture then
               pin:Hide()
             else
-              pin:ClearAllPoints()
-              pin:SetPoint("CENTER", pfMap.drawlayer, "CENTER", xPos, -yPos)
+              -- Suppress sub-pixel coordinate noise while stationary. Real
+              -- movement still updates at the measured 20 Hz cadence.
+              if not pin.qevX or not pin.qevY
+                  or math.abs(pin.qevX - xPos) >= .20
+                  or math.abs(pin.qevY - yPos) >= .20 then
+                pin:ClearAllPoints()
+                pin:SetPoint("CENTER", pfMap.drawlayer, "CENTER", xPos, -yPos)
+                pin.qevX = xPos
+                pin.qevY = yPos
+              end
               pin:Show()
             end
             i = i + 1
@@ -1072,7 +1415,11 @@ function pfMap:UpdateMinimap()
   perf.miniCandidates = candidates
 
   for j = i, table.getn(pfMap.mpins) do
-    if pfMap.mpins[j] and pfMap.mpins[j]:IsShown() then pfMap.mpins[j]:Hide() end
+    if pfMap.mpins[j] and pfMap.mpins[j]:IsShown() then
+      pfMap.mpins[j]:Hide()
+      pfMap.mpins[j].qevX = nil
+      pfMap.mpins[j].qevY = nil
+    end
   end
 end
 
@@ -1087,12 +1434,83 @@ function EV:CountNodesForMap(mapID)
   return n
 end
 
+function EV:GetActiveQuestNodeCoverage()
+  local nodeQuestIDs = {}
+  local addonNodes = pfMap and pfMap.nodes and pfMap.nodes["PFQUEST"] or nil
+  if type(addonNodes) == "table" then
+    for _, mapNodes in pairs(addonNodes) do
+      if type(mapNodes) == "table" then
+        for _, combinedNode in pairs(mapNodes) do
+          if type(combinedNode) == "table" then
+            for _, meta in pairs(combinedNode) do
+              local questid = type(meta) == "table" and tonumber(meta.questid) or nil
+              if questid then nodeQuestIDs[questid] = true end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  local active, covered, missing = 0, 0, {}
+  if pfQuest and type(pfQuest.questlog) == "table" then
+    for questid, data in pairs(pfQuest.questlog) do
+      active = active + 1
+      local numericID = tonumber(questid)
+      if numericID and nodeQuestIDs[numericID] then
+        covered = covered + 1
+      else
+        missing[table.getn(missing) + 1] = {
+          id = numericID,
+          key = questid,
+          title = type(data) == "table" and data.title or tostring(questid),
+          qlogid = type(data) == "table" and data.qlogid or nil,
+          state = type(data) == "table" and data.state or nil,
+        }
+      end
+    end
+  end
+
+  return active, covered, missing
+end
+
+EV.activeNodeAuditTried = EV.activeNodeAuditTried or {}
+function EV:EnsureActiveQuestNodes(reason)
+  if not self.questStateReady or not pfDatabase
+      or type(pfDatabase.SearchQuestID) ~= "function" then return 0 end
+
+  local _, coveredBefore, missing = self:GetActiveQuestNodeCoverage()
+  local attempted = 0
+  for _, item in pairs(missing) do
+    if item.id and item.qlogid then
+      local fingerprint = tostring(item.qlogid) .. "|" .. tostring(item.state)
+      if self.activeNodeAuditTried[item.id] ~= fingerprint then
+        self.activeNodeAuditTried[item.id] = fingerprint
+        pcall(pfDatabase.SearchQuestID, pfDatabase, item.id, {
+          ["addon"] = "PFQUEST",
+          ["qlogid"] = item.qlogid,
+        })
+        attempted = attempted + 1
+      end
+    end
+  end
+
+  local _, coveredAfter = self:GetActiveQuestNodeCoverage()
+  local repaired = math.max((coveredAfter or 0) - (coveredBefore or 0), 0)
+  if repaired > 0 then
+    self:NotifyQuestNodesChanged("active-audit:" .. tostring(reason or "unknown"))
+  elseif attempted > 0 then
+    self.activeNodeAuditUnresolved = (self.activeNodeAuditUnresolved or 0) + attempted
+  end
+  return repaired
+end
+
 function EV:Diagnostic()
   local mapID, mapName, cid, mid, mapInfo, viewKind = self:GetSelectedMapID()
   local p = self.player
-  local entries, quests = 0, 0
+  local entries, quests, snapshotComplete = 0, 0, true
   if self.GetQuestLogCounts then
-    entries, quests = self:GetQuestLogCounts()
+    entries, quests, snapshotComplete = self:GetQuestLogCounts()
   elseif type(GetNumQuestLogEntries) == "function" then
     entries = tonumber(GetNumQuestLogEntries()) or 0
   end
@@ -1102,6 +1520,12 @@ function EV:Diagnostic()
     .. " dbLocalized=" .. tostring(pfDatabase and pfDatabase.localized))
 
   local loc = self:RefreshLocationContext()
+  local activeNodeQuests, coveredNodeQuests, missingNodeQuests =
+    self:GetActiveQuestNodeCoverage()
+  local missingTitles = {}
+  for index = 1, math.min(table.getn(missingNodeQuests), 3) do
+    missingTitles[index] = tostring(missingNodeQuests[index].title)
+  end
 
   chat("player zone=" .. tostring(p.zone)
     .. " mapID=" .. tostring(p.mapID)
@@ -1134,6 +1558,7 @@ function EV:Diagnostic()
 
   chat("mapContextPrime=" .. tostring(self.mapContextPrimeLastResult)
     .. " count=" .. tostring(self.mapContextPrimeCount or 0)
+    .. " probes=" .. tostring(self.mapContextProbeCount or 0)
     .. " reason=" .. tostring(self.mapContextPrimeLastReason))
 
   chat("quests=" .. tostring(quests)
@@ -1144,12 +1569,19 @@ function EV:Diagnostic()
   chat("questState ready=" .. tostring(self.questStateReady)
     .. " sync=" .. tostring(self.questSyncSource)
     .. " availability=" .. tostring(self.availableQuestMode)
-    .. " authoritative=" .. tostring(self.questHistoryAuthoritative)
     .. " historyAuthoritative=" .. tostring(self.questHistoryAuthoritative)
     .. " availableGivers=" .. tostring(self:CanRenderAvailableQuests())
+    .. " clientConfirmed=" .. tostring(CountTable(pfQuest_confirmedAvailable))
+    .. " logSnapshot=" .. tostring(snapshotComplete and "complete" or "collapsed")
+    .. " cleanedTitles=" .. tostring(self.decoratedQuestTitleReads or 0)
     .. " completed=" .. tostring(self.questSyncCount)
     .. " history=" .. tostring(CountTable(pfQuest_history))
     .. " liveQuestlog=" .. tostring(pfQuest and CountTable(pfQuest.questlog) or 0))
+
+  chat("activeNodes covered=" .. tostring(coveredNodeQuests)
+    .. "/" .. tostring(activeNodeQuests)
+    .. " missing=" .. tostring(table.concat(missingTitles, ", "))
+    .. " unresolvedAudits=" .. tostring(self.activeNodeAuditUnresolved or 0))
 
   chat("render worldVisible=" .. tostring(VisibleCount(pfMap and pfMap.pins))
     .. " miniVisible=" .. tostring(VisibleCount(pfMap and pfMap.mpins))
@@ -1157,7 +1589,9 @@ function EV:Diagnostic()
     .. " env=" .. tostring(self.minimapEnvironment)
     .. "/" .. tostring(self.minimapEnvironmentSource)
     .. " playerMarker=" .. tostring(self.playerMarker and self.playerMarker:IsShown())
-    .. " nativeArrowHidden=" .. tostring(self.nativeWorldArrowsHidden))
+    .. " nativeArrowHidden=" .. tostring(self.nativeWorldArrowsHidden)
+    .. " visualResets=" .. tostring(self.minimapVisualResetCount or 0)
+    .. "/" .. tostring(self.minimapVisualResetReason or "none"))
 
   local perf = self.perf or {}
   chat("perf miniRuns=" .. tostring(perf.miniRuns or 0)
@@ -1166,7 +1600,8 @@ function EV:Diagnostic()
     .. " interval=" .. tostring(perf.miniInterval or 0)
     .. " fps=" .. tostring(perf.fpsNow or 0)
     .. " fpsAvg=" .. tostring(perf.fpsAvg or 0)
-    .. " fpsMin=" .. tostring(perf.fpsMin or 0))
+    .. " fpsMin=" .. tostring(perf.fpsMin or 0)
+    .. " fpsReset=" .. tostring(perf.fpsResetReason or "startup"))
 
   chat("perf cacheNodes=" .. tostring(perf.miniCachedNodes or 0)
     .. " candidates=" .. tostring(perf.miniCandidates or 0)
@@ -1174,7 +1609,11 @@ function EV:Diagnostic()
     .. " generation=" .. tostring(perf.miniCacheGeneration or 0)
     .. " cacheReason=" .. tostring(perf.miniLastCacheReason)
     .. " worldRuns=" .. tostring(perf.worldRuns or 0)
-    .. " worldSkips=" .. tostring(perf.worldSkips or 0))
+    .. " worldSkips=" .. tostring(perf.worldSkips or 0)
+    .. " worldDense=" .. tostring(perf.worldDenseMode)
+    .. " worldNodes=" .. tostring(perf.worldNodeRendered or 0)
+    .. "/" .. tostring(perf.worldNodeTotal or 0)
+    .. " suppressed=" .. tostring(perf.worldNodeSuppressed or 0))
 
   local qevZoom = nil
   if Minimap and type(Minimap.GetZoom) == "function" then
@@ -1236,6 +1675,8 @@ local function Command(msg)
   msg = string.gsub(msg, "%s+$", "")
   msg = string.gsub(msg, "^/qev%s*", "")
   msg = string.gsub(msg, "^qev%s*", "")
+  msg = string.gsub(msg, "^/koquest%s*", "")
+  msg = string.gsub(msg, "^koquest%s*", "")
 
   if msg == "force" or msg == "refresh" then
     EV:ForceRefresh()
@@ -1252,11 +1693,12 @@ local function Command(msg)
     EV:Diagnostic()
   else
     EV:Diagnostic()
-    chat("commands: /qev | /qev force | /qev sync | /qev map")
+    chat("commands: /koquest | /koquest force | /koquest sync | /koquest map (legacy: /qev)")
   end
 end
 
 SLASH_QUESTIEEV1 = "/qev"
+SLASH_QUESTIEEV2 = "/koquest"
 SlashCmdList["QUESTIEEV"] = Command
 
 -- Bootstrap / continuous player-map independence.
@@ -1275,6 +1717,8 @@ if pcall and driver.RegisterEvent then
   EV.minimapZoomEventRegistered = okZoom and true or false
   local okIndoor = pcall(driver.RegisterEvent, driver, "ZONE_CHANGED_INDOORS")
   EV.zoneIndoorsEventRegistered = okIndoor and true or false
+  local okQuestDetail = pcall(driver.RegisterEvent, driver, "QUEST_DETAIL")
+  EV.questDetailEventRegistered = okQuestDetail and true or false
 end
 driver:RegisterEvent("ADDON_LOADED")
 driver:RegisterEvent("QUEST_LOG_UPDATE")
@@ -1304,8 +1748,13 @@ driver:SetScript("OnEvent", function()
     EV.mapContextPrimeAt = nil
     EV.mapContextPrimeCooldownUntil = nil
     EV.mapContextPrimeBusy = false
+    EV.mapContextProbe = nil
     EV.minimapProjectionAt = nil
     EV.location = {}
+    EV.mapContextBootstrapAttempted = false
+    EV.mapContextProbeAttempted = false
+    EV.mapContextProbe = nil
+    EV.mapContextProbeCount = 0
     if EV.playerMarker and EV.playerMarker.Hide then EV.playerMarker:Hide() end
     return
   end
@@ -1317,6 +1766,10 @@ driver:SetScript("OnEvent", function()
     EV.mapRuntimeReadyAt = EV.startupReadyAt
     this.captureAt = EV.startupReadyAt
     EV.location = {}
+    EV.mapContextBootstrapAttempted = false
+    EV.mapContextProbeAttempted = false
+    EV.mapContextProbe = nil
+    EV.mapContextProbeCount = 0
     EV:MarkMinimapNodeCacheDirty("player-entering-world")
     EV.worldMapForceNext = true
     EV.renderPrimeRequested = true
@@ -1327,6 +1780,21 @@ driver:SetScript("OnEvent", function()
 
   if not EV.inWorld then return end
 
+  if event == "QUEST_DETAIL" then
+    -- GetTitleText is the documented, unprotected quest-packet getter. Never
+    -- call protected nearest-interaction helpers from addon Lua: build 2286 can
+    -- terminate the UE process instead of returning a recoverable Lua error.
+    local title = nil
+    if type(GetTitleText) == "function" then
+      local ok, value = pcall(GetTitleText)
+      if ok and type(value) == "string" and value ~= "" then title = value end
+    end
+    if title and EV.ConfirmAvailableQuestTitle then
+      EV:ConfirmAvailableQuestTitle(title, "QUEST_DETAIL")
+    end
+    return
+  end
+
   -- Large-area changes can happen around Hearthstones/instances. Clear the
   -- cached position and let Emberveil establish its own map context naturally.
   if event == "ZONE_CHANGED_NEW_AREA" then
@@ -1334,6 +1802,10 @@ driver:SetScript("OnEvent", function()
     EV.mapRuntimeReadyAt = GetTime() + 1.50
     EV:InvalidatePlayerPosition(true, "new-area")
     EV.location = {}
+    EV.mapContextBootstrapAttempted = false
+    EV.mapContextProbeAttempted = false
+    EV.mapContextProbe = nil
+    EV.mapContextProbeCount = 0
     this.captureAt = EV.mapRuntimeReadyAt
     EV:MarkMinimapNodeCacheDirty("zone-changed-new-area")
     EV.worldMapForceNext = true
@@ -1344,7 +1816,7 @@ driver:SetScript("OnEvent", function()
 
   if event == "ZONE_CHANGED" then
     EV.minimapOutdoorEventCount = (EV.minimapOutdoorEventCount or 0) + 1
-    EV:SetMinimapEnvironment(1, "ZONE_CHANGED-outdoor", true)
+    EV:SetMinimapEnvironment(1, "ZONE_CHANGED", false)
     EV:RefreshLocationContext(true)
     EV:ScheduleMinimapProjection(.08, "ZONE_CHANGED")
     this.captureAt = GetTime() + .10
@@ -1353,7 +1825,9 @@ driver:SetScript("OnEvent", function()
 
   if event == "ZONE_CHANGED_INDOORS" then
     EV.minimapIndoorEventCount = (EV.minimapIndoorEventCount or 0) + 1
-    EV:SetMinimapEnvironment(0, "ZONE_CHANGED_INDOORS", true)
+    -- This event name is not an indoor-scale oracle on Emberveil. Sentinel
+    -- Tower fires it outdoors; forcing the indoor span there makes pins drift.
+    EV:SetMinimapEnvironment(1, "ZONE_CHANGED_INDOORS", false)
     EV:RefreshLocationContext(true)
     EV:ScheduleMinimapProjection(.08, "ZONE_CHANGED_INDOORS")
     this.captureAt = GetTime() + .10
@@ -1383,7 +1857,9 @@ driver:SetScript("OnEvent", function()
   if event == "WORLD_MAP_UPDATE" then
     this.captureAt = GetTime() + .15
 
-    if not EV:IsWorldMapShown() then
+    if not EV.mapContextPrimeBusy
+        and not EV.mapContextProbe
+        and not EV:IsWorldMapShown() then
       EV.mapContextPrimeAt = GetTime() + .20
     end
     return
@@ -1415,7 +1891,6 @@ driver:SetScript("OnUpdate", function()
   if not EV.inWorld then return end
 
   local now = GetTime()
-  EV:SampleFramerate(now)
 
   if EV.mapRuntimeReadyAt and now < EV.mapRuntimeReadyAt then
     return
@@ -1426,6 +1901,13 @@ driver:SetScript("OnUpdate", function()
 
   if EV.startupReadyAt and now < EV.startupReadyAt then return end
   if EV.startupReadyAt then EV.startupReadyAt = nil end
+
+  EV:SampleFramerate(now)
+
+  if EV.mapContextProbe
+      and now >= (EV.mapContextProbe.nextAt or 0) then
+    EV:ProcessHiddenZoneProbe(2)
+  end
 
   -- Quest node changes are rare and user-visible, so service their coalesced
   -- render deadline before the 200 ms maintenance throttle. This adds only a

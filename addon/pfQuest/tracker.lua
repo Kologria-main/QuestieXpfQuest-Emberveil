@@ -625,6 +625,19 @@ function tracker.ButtonAdd(title, node)
 end
 
 function tracker.Reset()
+  local numEntries = 0
+  local snapshotComplete = true
+  if QuestieEV and QuestieEV.GetQuestLogCounts then
+    numEntries, _, snapshotComplete = QuestieEV:GetQuestLogCounts()
+  elseif type(GetNumQuestLogEntries) == "function" then
+    numEntries = tonumber(GetNumQuestLogEntries()) or 0
+  end
+  if numEntries < 0 then numEntries = 0 end
+
+  -- Collapsed headers hide rows from Emberveil's visible-row count. Keep the
+  -- last complete tracker view instead of incorrectly deleting those quests.
+  if snapshotComplete == false then return end
+
   tracker:SetHeight(panelheight)
   for id, button in pairs(tracker.buttons) do
     button.level = nil
@@ -634,15 +647,6 @@ function tracker.Reset()
     button:SetHeight(0)
     button:Hide()
   end
-
-  -- add tracked quests
-  local numEntries = 0
-  if QuestieEV and QuestieEV.GetQuestLogCounts then
-    numEntries = QuestieEV:GetQuestLogCounts()
-  elseif type(GetNumQuestLogEntries) == "function" then
-    numEntries = tonumber(GetNumQuestLogEntries()) or 0
-  end
-  if numEntries < 0 then numEntries = 0 end
 
   -- iterate over all visible quest-log rows
   for qlogid=1,numEntries do

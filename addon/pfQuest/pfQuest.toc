@@ -1,12 +1,12 @@
 ## Interface: 11200
-## Title: |cff33ffccQuestie|r |cffffffffEmberveil (pfQuest Engine)|r
+## Title: |cff33ffccKoQuest|r |cffffffff(Emberveil, pfQuest Engine)|r
 ## Author: Shagu (pfQuest) + Emberveil compatibility port
-## Notes: Quest helper/database for Emberveil; pfQuest-derived engine.
-## Notes-ruRU: Облегченный помощник заданий и база данных
-## Version: EV-2.0.0-beta1.18
+## Notes: Safe quest helper and localized database for Emberveil.
+## Notes-ruRU: Безопасный помощник заданий и локализованная база данных для Emberveil
+## Version: EV-2.0.0-beta1.19
 ## OptionalDeps: pfUI
 ## SavedVariables: pfQuest_questcache
-## SavedVariablesPerCharacter: pfQuest_config, pfBrowser_fav, pfQuest_history, pfQuest_colors, pfQuest_server, pfQuest_track
+## SavedVariablesPerCharacter: pfQuest_config, pfBrowser_fav, pfQuest_history, pfQuest_colors, pfQuest_server, pfQuest_track, pfQuest_confirmedAvailable
 
 init\data.xml
 init\enUS.xml

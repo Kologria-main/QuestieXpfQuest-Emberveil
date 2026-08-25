@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0-beta1.19 — 2026-08-25
+
+- Enable database-matched available quest-giver markers by default on both the world map and minimap, filtered by eligibility, the active log, and KoQuest's recorded completion history.
+- Keep an explicitly labeled control that can disable unverified quest-giver markers. Emberveil has no verified character-wide completion getter, so quests completed before KoQuest was installed remain the one unavoidable best-effort limitation.
+- Keep only the original hoverable pfQuest world-map icons in dense zones; remove the experimental non-hoverable raw-dot overlay and its texture cost.
+- Normalize runtime-decorated quest titles such as `[24] Weapons of Choice`, including late-loaded CT_QuestLevels compatibility, fixing localized title-to-ID matching.
+- Treat any collapsed quest-log header as an incomplete snapshot; hidden quests are no longer removed from map state, history, or the tracker.
+- Use Thomas's measured numeric race/class return IDs for locale-independent bitmask filtering, with the original tokens as fallback.
+- Add Russian, Simplified Chinese, and Traditional Chinese text for the new safety option, and validate that those databases contain every enUS lookup ID.
+- Restrict normal SavedVariables discovery to the exact supplied root, install-adjacent named data directories, and the confirmed Azeroth account root. Profile-wide scanning now requires an explicit support switch.
+- Add isolated SavedVariables repair regression testing so release validation cannot touch a real player profile.
+- Add the offline, hash-verifying, transactional `INSTALL_KOQUEST_LINUX.sh` installer for Linux/Wine/Proton.
+- Adopt KoQuest public branding while retaining the internal `pfQuest` folder, SavedVariables, `/qev`, and old Windows launcher for compatibility.
+
 ## 2.0.0-beta1.18 — 2026-08-22
 
 - Move the route 50 ms throttle ahead of the player-map-position bridge call, preventing high-refresh clients from invoking that bridge at render-frame frequency.
