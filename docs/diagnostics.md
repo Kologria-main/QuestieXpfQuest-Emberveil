@@ -1,6 +1,8 @@
 # Diagnostics
 
-Run `/koquest` in chat (`/qev` remains a compatibility alias). It reports the addon version, database localization, player and selected map identity, coordinate freshness/source, completed-quest synchronization status, whether history is authoritative, available-quest safety mode, collapsed-log snapshot state, cleaned localized-title count, node counts, minimap policy, indoor/outdoor environment source, adaptive update cadence, FPS sample, and compatibility fallbacks.
+Run `/koquest` in chat (`/qev` remains a compatibility alias). It reports the addon version, requested/loaded database locale and fallback reason, quest-title index reuse, player and selected map identity, coordinate freshness/source, completed-quest synchronization status, whether history is authoritative, available-quest safety mode, collapsed-log snapshot state, cleaned localized-title count, node counts, minimap policy, indoor/outdoor environment source, adaptive update cadence, FPS sample, and compatibility fallbacks.
+
+For locale troubleshooting, `status=loaded` means the matching sibling pack was loaded; `status=core` means the English core was requested; and `status=fallback` includes the failed pack and error reason. The title-index counters should normally show one build followed by increasing lookup hits.
 
 The quest-state line has two important guarantees:
 

@@ -3,3 +3,4 @@ dist/
 work/
 *.log
 .qev-*/
+.ua/

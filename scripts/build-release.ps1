@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '2.0.0-beta1.20'
+    [string]$Version = '2.0.0-beta1.21'
 )
 
 Set-StrictMode -Version Latest
@@ -76,7 +76,15 @@ try {
         "$packageName/INSTALL_KOQUEST_LINUX.sh",
         "$packageName/INSTALL_QUESTIE_EMBERVEIL.cmd",
         "$packageName/installer/payload-manifest.sha256",
-        "$packageName/addon/pfQuest/pfQuest.toc"
+        "$packageName/addon/pfQuest/pfQuest.toc",
+        "$packageName/addon/pfQuest_Locale_deDE/pfQuest_Locale_deDE.toc",
+        "$packageName/addon/pfQuest_Locale_esES/pfQuest_Locale_esES.toc",
+        "$packageName/addon/pfQuest_Locale_frFR/pfQuest_Locale_frFR.toc",
+        "$packageName/addon/pfQuest_Locale_koKR/pfQuest_Locale_koKR.toc",
+        "$packageName/addon/pfQuest_Locale_ptBR/pfQuest_Locale_ptBR.toc",
+        "$packageName/addon/pfQuest_Locale_ruRU/pfQuest_Locale_ruRU.toc",
+        "$packageName/addon/pfQuest_Locale_zhCN/pfQuest_Locale_zhCN.toc",
+        "$packageName/addon/pfQuest_Locale_zhTW/pfQuest_Locale_zhTW.toc"
     )) {
         if (-not $seen.ContainsKey($required.ToLowerInvariant())) { throw "ZIP missing required entry: $required" }
     }

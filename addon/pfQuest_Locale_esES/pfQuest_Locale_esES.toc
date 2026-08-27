@@ -1,0 +1,9 @@
+## Interface: 11200
+## Title: |cff33ffccKoQuest|r Locale - Spanish
+## Author: Shagu (pfQuest) + Emberveil compatibility port
+## Notes: Spanish database pack for KoQuest. Loaded on demand.
+## Version: EV-2.0.0-beta1.21
+## LoadOnDemand: 1
+## X-KoQuest-Locale: esES
+
+init\esES.xml

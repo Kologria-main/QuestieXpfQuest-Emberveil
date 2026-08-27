@@ -2,7 +2,7 @@
 
 Quest and objective markers for the Emberveil client, built from the proven [pfQuest](https://github.com/shagu/pfQuest) engine and adapted for Emberveil's Unreal-backed UI and Vanilla-style Lua API.
 
-Current development release: **2.0.0-beta1.20**
+Current development release: **2.0.0-beta1.21**
 
 > KoQuest is a community beta, not an official Emberveil addon. It is deliberately conservative: if the client cannot prove that a coordinate or quest state is valid, the addon hides the affected marker instead of showing a potentially wrong one.
 
@@ -16,6 +16,7 @@ Current development release: **2.0.0-beta1.20**
 - Correct three-state quest handling: complete, failed, or incomplete.
 - Indoor parent-zone continuity without mutating the native minimap.
 - Adaptive minimap update cadence and spatial node caching for dense zones.
+- Load-on-demand database locales, so startup parses English plus only the active client language instead of every translation.
 - `/koquest` diagnostics and controlled refresh commands (`/qev` remains an alias).
 - English, Russian, Simplified Chinese, and Traditional Chinese quest databases and UI support.
 
@@ -27,7 +28,7 @@ After extracting the ZIP and exiting Emberveil completely:
 
 1. Windows: double-click `INSTALL_KOQUEST.cmd`. The old `INSTALL_QUESTIE_EMBERVEIL.cmd` name remains as a compatibility launcher.
 2. Linux/Wine/Proton: run `./INSTALL_KOQUEST_LINUX.sh "/path/to/Interface/AddOns"`.
-3. Manual: copy `addon\pfQuest` to Emberveil's `Interface\AddOns` folder so the final path is `Interface\AddOns\pfQuest\pfQuest.toc`.
+3. Manual: copy every folder inside `addon` to Emberveil's `Interface\AddOns` folder. The core path must be `Interface\AddOns\pfQuest\pfQuest.toc`; the sibling `pfQuest_Locale_*` folders supply on-demand translations.
 
 The usual Windows launcher installation is:
 
@@ -39,7 +40,7 @@ Restart Emberveil completely after installing. See [Installation](docs/installat
 
 ## Safety and privacy
 
-- The game addon is Lua/XML/data/images only; no executable content is placed inside `Interface\AddOns\pfQuest`.
+- The managed game-addon folders contain Lua/XML/data/images only; no executable content is placed inside `Interface\AddOns`.
 - It performs no downloads, telemetry, chat messages, or addon-channel broadcasts.
 - The Windows and Linux installers are offline, verify SHA-256 hashes, stage changes on the target volume, back up an existing addon, and roll back on failure.
 - Native UI child/region enumeration, tooltip hyperlink bridge calls, forced client termination, native minimap zoom mutation, dynamic code execution, and unsolicited transmissions are prohibited by automated validation.
@@ -60,7 +61,7 @@ When reporting a problem, include the `/koquest` output, client locale, exact lo
 
 ## Verification
 
-The validation suite parses every Lua file as Lua 5.1, verifies TOC/XML references, checks requested-locale database coverage, enforces safety contracts, executes quest-state scenarios against the real compatibility layer, validates every payload hash, tests Windows and Linux installation in isolated fake game trees, rejects tampered payloads, and fully reads the release ZIP.
+The validation suite parses every Lua file as Lua 5.1, verifies core and locale-pack TOC/XML references, checks requested-locale database coverage and on-demand loading behavior, enforces safety contracts, executes runtime scenarios against the real compatibility layer, validates every payload hash, tests transactional Windows and Linux installation in isolated fake game trees, rejects tampered payloads, and fully reads the release ZIP.
 
 Run the developer checks with:
 
@@ -70,7 +71,7 @@ pnpm validate
 powershell -NoProfile -File .\scripts\validate-release.ps1
 ```
 
-The exact beta1.20 evidence is recorded in [Release validation](docs/release-validation.md). The broader scope and remaining client-dependent checks are documented in [Testing](docs/testing.md) and [Known issues](docs/known-issues.md).
+The exact beta1.21 evidence is recorded in [Release validation](docs/release-validation.md). The broader scope and remaining client-dependent checks are documented in [Testing](docs/testing.md) and [Known issues](docs/known-issues.md).
 
 ## Credits and license
 

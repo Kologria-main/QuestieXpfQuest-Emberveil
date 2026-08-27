@@ -150,10 +150,9 @@ for _, exp in pairs({ "-tbc", "-wotlk" }) do
   if pfDB["meta"..exp] then patchtable(pfDB["meta"], pfDB["meta"..exp]) end
 end
 
--- detect installed locales
-for key, name in pairs(pfDB.locales) do
-  if not pfDB["quests"][key] then pfDB.locales[key] = nil end
-end
+-- Keep the complete shipped locale catalog visible. Non-active databases live
+-- in load-on-demand sibling addons and are loaded only if the quest-log
+-- translation menu requests them.
 
 -- detect localized databases
 pfDatabase.dbstring = ""
@@ -313,6 +312,7 @@ end
 
 -- add database shortcuts
 local items, units, objects, quests, zones, refloot, itemreq, areatrigger, professions
+local questTitleIndex, questTitleIndexSource
 pfDatabase.Reload = function()
   items = pfDB["items"]["data"]
   units = pfDB["units"]["data"]
@@ -323,6 +323,8 @@ pfDatabase.Reload = function()
   itemreq = pfDB["quests-itemreq"]["data"]
   areatrigger = pfDB["areatrigger"]["data"]
   professions = pfDB["professions"]["loc"]
+  questTitleIndex = nil
+  questTitleIndexSource = nil
 end
 
 pfDatabase.Reload()
@@ -1678,27 +1680,56 @@ end
 -- GetQuestIDs
 -- Try to guess the quest ID based on the questlog ID
 -- Returns possible quest IDs
+local function GetQuestTitleMatch(title)
+  local source = pfDB["quests"]["loc"]
+  pfDatabase.questTitleIndexLookups = (pfDatabase.questTitleIndexLookups or 0) + 1
+
+  if not questTitleIndex or questTitleIndexSource ~= source then
+    questTitleIndex = {}
+    questTitleIndexSource = source
+
+    local entries, duplicates = 0, 0
+    for id, data in pairs(source) do
+      if quests[id] and type(data) == "table" and type(data.T) == "string" then
+        local current = questTitleIndex[data.T]
+        if not current then
+          questTitleIndex[data.T] = id
+          entries = entries + 1
+        elseif type(current) == "number" then
+          questTitleIndex[data.T] = { current, id }
+          duplicates = duplicates + 1
+        else
+          table.insert(current, id)
+          duplicates = duplicates + 1
+        end
+      end
+    end
+
+    pfDatabase.questTitleIndexBuilds = (pfDatabase.questTitleIndexBuilds or 0) + 1
+    pfDatabase.questTitleIndexEntries = entries
+    pfDatabase.questTitleIndexDuplicates = duplicates
+  else
+    pfDatabase.questTitleIndexHits = (pfDatabase.questTitleIndexHits or 0) + 1
+  end
+
+  return questTitleIndex[title]
+end
+
 function pfDatabase:GetQuestIDs(qid)
   local title, level, _, header = compat.GetQuestLogTitle(qid)
   if header or not title then return end
 
   -- First resolve by the currently visible title. Most quests are unique and
   -- need no quest-log selection changes, tooltip links, or undocumented APIs.
-  local candidates = {}
-  for id, data in pairs(pfDB["quests"]["loc"]) do
-    if quests[id] and data.T == title then
-      table.insert(candidates, id)
-    end
-  end
-
-  if table.getn(candidates) == 0 then
+  local candidates = GetQuestTitleMatch(title)
+  if not candidates then
     -- Custom/renamed Emberveil quest: keep title identity but never attach a
     -- different bundled quest's coordinates by fuzzy name.
     return { title }
   end
 
-  if table.getn(candidates) == 1 then
-    return { candidates[1] }
+  if type(candidates) == "number" then
+    return { candidates }
   end
 
   -- Duplicate quest titles require description/objective disambiguation.
