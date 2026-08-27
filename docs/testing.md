@@ -24,6 +24,7 @@ Every release must pass:
 - Windows installer validation-only, isolated SavedVariables repair, clean install, upgrade/backup, exact installed-hash comparison, and invalid-payload rejection in an isolated test game tree.
 - Linux installer shell parsing, offline hash verification, isolated installation, and exact installed-hash comparison.
 - Release ZIP entry traversal checks, duplicate-path checks, full decompression/CRC read, required-file checks, and SHA-256 generation.
+- Compact Discord archive integrity, required-entry, extracted-installer, and strict sub-20,000,000-byte checks. Repository-only screenshots may be omitted; addon files and locale packs may not be omitted.
 
 ## In-game acceptance matrix
 

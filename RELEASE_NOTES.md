@@ -4,6 +4,10 @@ This update removes the largest avoidable startup cost and fixes the map-event
 race that could leave a valid zone with no KoQuest icons until `/koquest map`
 was run manually.
 
+The Discord distribution is a compact `.7z` under 20 MB. It retains the same
+verified installer, complete addon payload, and all locale packs as the normal
+ZIP, while omitting only repository screenshots that are not installed in game.
+
 ## Performance changes
 
 - The core keeps the English fallback database resident and loads only the

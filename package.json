@@ -5,6 +5,7 @@
   "description": "Offline validation tools for the KoQuest Emberveil addon release.",
   "packageManager": "pnpm@11.19.0",
   "scripts": {
+    "build:discord": "pwsh -NoProfile -File scripts/build-discord-release.ps1",
     "validate": "node scripts/validate-source.mjs && node scripts/run-lua-tests.mjs tests/quest-state.lua tests/locale-loading.lua tests/quest-title-index.lua tests/map-runtime.lua",
     "test:quest-state": "node scripts/run-lua-tests.mjs tests/quest-state.lua",
     "test:locale-loading": "node scripts/run-lua-tests.mjs tests/locale-loading.lua",

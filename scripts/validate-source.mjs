@@ -103,6 +103,7 @@ if (!packageMetadata.scripts?.validate?.includes("scripts/run-lua-tests.mjs")) {
 for (const [file, pattern] of [
   [path.join(repo, "installer", "Install-Questie-Emberveil.ps1"), `$Version = '${expectedVersion}'`],
   [path.join(repo, "scripts", "build-release.ps1"), `[string]$Version = '${expectedVersion}'`],
+  [path.join(repo, "scripts", "build-discord-release.ps1"), `[string]$Version = '${expectedVersion}'`],
   [path.join(repo, "INSTALL_KOQUEST_LINUX.sh"), `VERSION='${expectedVersion}'`],
 ]) {
   if (!fs.readFileSync(file, "utf8").includes(pattern)) fail(`${rel(file)} version mismatch`);
@@ -217,6 +218,7 @@ const quest = fs.readFileSync(path.join(addon, "quest.lua"), "utf8");
 const tracker = fs.readFileSync(path.join(addon, "tracker.lua"), "utf8");
 const database = fs.readFileSync(path.join(addon, "database.lua"), "utf8");
 const config = fs.readFileSync(path.join(addon, "config.lua"), "utf8");
+const discordBuilder = fs.readFileSync(path.join(repo, "scripts", "build-discord-release.ps1"), "utf8");
 
 const contracts = [
   [compat.includes(`EV.version = "${expectedVersion}"`), "compatibility-layer version mismatch"],
@@ -283,6 +285,11 @@ const contracts = [
   [!mapEngine.includes(`RenderWorldDots`), "non-hoverable world-map dot layer is still present"],
   [config.includes(`default = "1", type = "checkbox", config = "unverifiedquestgivers"`), "available quest givers are not enabled by default"],
   [config.includes(`pfQuest_config["availabilitydefaultv2"]`), "available quest-giver upgrade migration missing"],
+  [packageMetadata.scripts?.["build:discord"]?.includes("build-discord-release.ps1"), "Discord build command missing"],
+  [discordBuilder.includes(`[long]$MaxBytes = 20000000`), "Discord archive lacks a strict 20 MB ceiling"],
+  [discordBuilder.includes(`'-xr!assets'`), "Discord archive does not exclude repository-only assets"],
+  [discordBuilder.includes(`'-m0=lzma2:d=64m'`), "Discord archive compression contract missing"],
+  [discordBuilder.includes(`-ValidateOnly`), "Discord archive does not validate its extracted installer"],
   [!mapEngine.includes(`math.floor((xPlayer - maxDx) / cellSize) - 1`), "minimap query retains an unnecessary border"],
 ];
 for (const [passed, message] of contracts) if (!passed) fail(message);

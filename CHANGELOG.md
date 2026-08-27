@@ -2,6 +2,7 @@
 
 ## 2.0.0-beta1.21 — 2026-08-26
 
+- Add a Discord-friendly solid-LZMA2 installer archive that retains the complete addon and every locale pack, omits only repository screenshots, and enforces a strict 20,000,000-byte ceiling.
 - Move every non-English database into a sibling `LoadOnDemand` locale addon. The core now parses English plus only the active client locale instead of loading and scanning all nine language databases at startup.
 - If Emberveil records a newly installed active locale pack as disabled, enable and retry only that requested pack once; never wake the other translations.
 - Build the exact quest-title lookup lazily and cache it by database revision, avoiding repeated full quest-table scans during normal quest-log reconciliation.

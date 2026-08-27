@@ -24,6 +24,13 @@ Current development release: **2.0.0-beta1.21**
 
 Download the ZIP from this repository's [GitHub Releases page](https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases). The release asset and all readable source are hosted in this same public repository, as required by Emberveil's addon rules.
 
+For Discord sharing, use `KoQuest_Emberveil_v2.0.0-beta1.21_Discord.7z`.
+It contains the same installer, complete 302-file addon payload, and all eight
+load-on-demand locale packs, but omits repository-only screenshots. Its build
+is required to stay below 20,000,000 bytes. Extract it with Windows 11 or
+[7-Zip](https://www.7-zip.org/) before running the installer; do not run the
+installer from inside the archive viewer.
+
 After extracting the ZIP and exiting Emberveil completely:
 
 1. Windows: double-click `INSTALL_KOQUEST.cmd`. The old `INSTALL_QUESTIE_EMBERVEIL.cmd` name remains as a compatibility launcher.
@@ -69,6 +76,7 @@ Run the developer checks with:
 pnpm install --frozen-lockfile
 pnpm validate
 powershell -NoProfile -File .\scripts\validate-release.ps1
+pnpm run build:discord
 ```
 
 The exact beta1.21 evidence is recorded in [Release validation](docs/release-validation.md). The broader scope and remaining client-dependent checks are documented in [Testing](docs/testing.md) and [Known issues](docs/known-issues.md).

@@ -1,6 +1,6 @@
 # Installation
 
-Download `KoQuest_Emberveil_v2.0.0-beta1.21.zip` from this repository's GitHub release, extract the entire ZIP to a normal folder, and exit Emberveil completely before installing.
+Download `KoQuest_Emberveil_v2.0.0-beta1.21.zip` from this repository's GitHub release, extract the entire ZIP to a normal folder, and exit Emberveil completely before installing. The Discord-friendly `KoQuest_Emberveil_v2.0.0-beta1.21_Discord.7z` contains the same installer, addon payload, and locale packs while omitting only repository screenshots. Extract the `.7z` with Windows 11 or 7-Zip before continuing; do not launch the installer from inside an archive viewer.
 
 The public name is KoQuest. The core installed folder remains `pfQuest` so upgrades preserve the engine's settings, history, and compatibility with existing installs. Eight `pfQuest_Locale_<locale>` folders contain load-on-demand database packs; the core loads only the current client locale and keeps English as its fallback.
 
