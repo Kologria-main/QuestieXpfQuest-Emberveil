@@ -6,7 +6,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$addon = Join-Path $repo 'addon\pfQuest'
+$addon = Join-Path $repo 'addon'
+$managedAddonNames = @(
+    'pfQuest',
+    'pfQuest_Locale_deDE',
+    'pfQuest_Locale_esES',
+    'pfQuest_Locale_frFR',
+    'pfQuest_Locale_koKR',
+    'pfQuest_Locale_ptBR',
+    'pfQuest_Locale_ruRU',
+    'pfQuest_Locale_zhCN',
+    'pfQuest_Locale_zhTW'
+)
 $manifestPath = Join-Path $repo 'installer\payload-manifest.sha256'
 $installer = Join-Path $repo 'installer\Install-Questie-Emberveil.ps1'
 $linuxInstaller = Join-Path $repo 'INSTALL_KOQUEST_LINUX.sh'
@@ -15,10 +26,14 @@ function Read-Manifest {
     $entries = @()
     foreach ($line in Get-Content -LiteralPath $manifestPath) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
-        if ($line -notmatch '^([A-Fa-f0-9]{64})\s+\*addon/pfQuest/(.+)$') { throw "Invalid manifest line: $line" }
+        if ($line -notmatch '^([A-Fa-f0-9]{64})\s+\*addon/(.+)$') { throw "Invalid manifest line: $line" }
+        $relative = $Matches[2].Replace('/', '\')
+        if ($managedAddonNames -notcontains $relative.Split('\')[0]) {
+            throw "Manifest contains unmanaged addon path: $relative"
+        }
         $entries += [pscustomobject]@{
             Hash = $Matches[1].ToUpperInvariant()
-            Relative = $Matches[2].Replace('/', '\')
+            Relative = $relative
         }
     }
     return $entries
@@ -26,7 +41,14 @@ function Read-Manifest {
 
 function Assert-TreeMatchesManifest {
     param([string]$Root, [object[]]$Manifest)
-    $files = @(Get-ChildItem -LiteralPath $Root -Recurse -File)
+    $files = @()
+    foreach ($addonName in $managedAddonNames) {
+        $addonRoot = Join-Path $Root $addonName
+        if (-not (Test-Path -LiteralPath $addonRoot -PathType Container)) {
+            throw "Missing managed addon $addonName under $Root"
+        }
+        $files += @(Get-ChildItem -LiteralPath $addonRoot -Recurse -File)
+    }
     if ($files.Count -ne $Manifest.Count) { throw "File count mismatch under $Root" }
     foreach ($entry in $Manifest) {
         $file = Join-Path $Root $entry.Relative
@@ -125,21 +147,25 @@ if (-not $SkipInstallerTests) {
         }
         $savedBackup = @(Get-ChildItem -LiteralPath (Join-Path $state 'Backups') -Recurse -Filter '*pfQuest.lua' -File)
         if ($savedBackup.Count -eq 0) { throw 'Installer did not back up the repaired SavedVariables file.' }
-        $installed = Join-Path $addOns 'pfQuest'
+        $installed = $addOns
+        $installedCore = Join-Path $addOns 'pfQuest'
         Assert-TreeMatchesManifest $installed $manifest
 
-        $legacyMarker = Join-Path $installed 'legacy-marker.txt'
+        $legacyMarker = Join-Path $installedCore 'legacy-marker.txt'
+        $legacyLocaleMarker = Join-Path $addOns 'pfQuest_Locale_koKR\legacy-marker.txt'
         Set-Content -LiteralPath $legacyMarker -Value 'backup-test' -Encoding ASCII
+        Set-Content -LiteralPath $legacyLocaleMarker -Value 'locale-backup-test' -Encoding ASCII
         $exitCode = Invoke-InstallerProcess $installer $addOns $state $savedVariables
         if ($exitCode -ne 0) { throw "Upgrade installer test failed with exit code $exitCode." }
         Assert-TreeMatchesManifest $installed $manifest
         if (Test-Path -LiteralPath $legacyMarker) { throw 'Upgrade left an obsolete file in the installed addon.' }
+        if (Test-Path -LiteralPath $legacyLocaleMarker) { throw 'Upgrade left an obsolete file in a locale pack.' }
         $backupMarker = Get-ChildItem -LiteralPath (Join-Path $state 'Backups') -Recurse -Filter 'legacy-marker.txt' -File
-        if (-not $backupMarker) { throw 'Upgrade did not preserve the previous addon in a backup.' }
+        if (@($backupMarker).Count -lt 2) { throw 'Upgrade did not preserve the previous core and locale folders in a backup.' }
 
         $tamperedRoot = Join-Path $testRoot 'TamperedRelease'
-        New-Item -ItemType Directory -Path (Join-Path $tamperedRoot 'addon') -Force | Out-Null
-        Copy-Item -LiteralPath $addon -Destination (Join-Path $tamperedRoot 'addon') -Recurse -Force
+        New-Item -ItemType Directory -Path $tamperedRoot -Force | Out-Null
+        Copy-Item -LiteralPath $addon -Destination $tamperedRoot -Recurse -Force
         Copy-Item -LiteralPath (Join-Path $repo 'installer') -Destination $tamperedRoot -Recurse -Force
         Add-Content -LiteralPath (Join-Path $tamperedRoot 'addon\pfQuest\compat\emberveil.lua') -Value '-- tampered'
         $tamperedInstaller = Join-Path $tamperedRoot 'installer\Install-Questie-Emberveil.ps1'
@@ -156,7 +182,7 @@ if (-not $SkipInstallerTests) {
         & $posixShell (Convert-ToMsysPath $linuxInstaller) (Convert-ToMsysPath $linuxAddOns) |
             ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { throw "Linux installer test failed with exit code $LASTEXITCODE." }
-        Assert-TreeMatchesManifest (Join-Path $linuxAddOns 'pfQuest') $manifest
+        Assert-TreeMatchesManifest $linuxAddOns $manifest
 
         Write-Host 'PASS: isolated SavedVariables repair, Windows install/upgrade, tamper rejection, and Linux install passed.' -ForegroundColor Green
     } finally {

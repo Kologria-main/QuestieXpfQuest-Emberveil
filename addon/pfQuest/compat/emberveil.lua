@@ -1,9 +1,9 @@
 -- KoQuest for Emberveil / pfQuest engine
--- Early compatibility layer v2.0.0-beta1.20
+-- Early compatibility layer v2.0.0-beta1.21
 
 QuestieEV = QuestieEV or {}
 local EV = QuestieEV
-EV.version = "2.0.0-beta1.20"
+EV.version = "2.0.0-beta1.21"
 EV.engine = "pfQuest"
 EV.sourceCommit = "104f35678ca39ab1fb78b655f815cc7016f5e0c8"
 

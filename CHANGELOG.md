@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.0-beta1.21 — 2026-08-26
+
+- Add a Discord-friendly solid-LZMA2 installer archive that retains the complete addon and every locale pack, omits only repository screenshots, and enforces a strict 20,000,000-byte ceiling.
+- Move every non-English database into a sibling `LoadOnDemand` locale addon. The core now parses English plus only the active client locale instead of loading and scanning all nine language databases at startup.
+- If Emberveil records a newly installed active locale pack as disabled, enable and retry only that requested pack once; never wake the other translations.
+- Build the exact quest-title lookup lazily and cache it by database revision, avoiding repeated full quest-table scans during normal quest-log reconciliation.
+- Cache map-node generations and dense world-map render buckets so unchanged map refreshes reuse their prepared data.
+- Fix blank world maps caused by a deferred `WORLD_MAP_UPDATE` race. KoQuest now performs one bounded immediate render, snapshots the selected map once, and uses a trailing retry only when selection or layout is still transitioning.
+- Reject transient zero-size map surfaces and empty zone tables without poisoning the selection cache or hiding pins permanently.
+- Extend `/koquest` with world-refresh event, immediate/deferred, retry, result, selection-key, map, and surface-size diagnostics.
+- Add Lua runtime regression tests for locale loading, lazy title indexing, empty-zone recovery, zero-size layout recovery, refresh coalescing, and immediate map-event rendering.
+- Install, verify, back up, roll back, and uninstall the core plus all eight managed locale packs transactionally on Windows and Linux.
+
 ## 2.0.0-beta1.20 — 2026-08-25
 
 - Restore the small colored pfQuest objective circles to dense world maps. Every visible circle is a real hoverable/clickable pfQuest button with the original spawn, quest, progress, and drop-rate tooltip.

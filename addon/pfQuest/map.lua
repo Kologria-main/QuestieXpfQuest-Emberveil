@@ -165,6 +165,10 @@ pfMap = CreateFrame("Frame", "pfQuestMap", WorldFrame)
 pfMap.str2rgb = str2rgb
 pfMap.tooltips = {}
 pfMap.nodes = {}
+-- Monotonic revision for the flattened Emberveil node caches. All structural
+-- mutations flow through AddNode/DeleteNode, so cache validity can be checked
+-- in O(1) without rescanning every map on each render.
+pfMap.nodeRevision = 0
 pfMap.pins = {}
 pfMap.mpins = {}
 pfMap.drawlayer = Minimap
@@ -173,6 +177,16 @@ pfMap.unifiedcache = unifiedcache
 pfMap.minimap_indoor = minimap_indoor
 pfMap.minimap_zoom = minimap_zoom
 pfMap.minimap_sizes = minimap_sizes
+
+function pfMap:MarkNodesChanged(reason)
+  self.nodeRevision = (self.nodeRevision or 0) + 1
+
+  -- emberveil_map.lua loads immediately after this file. Keep the callback
+  -- optional so the inherited map module remains safe during addon bootstrap.
+  if QuestieEV and QuestieEV.NotifyMapNodesChanged then
+    QuestieEV:NotifyMapNodesChanged(reason or "pfmap-mutation")
+  end
+end
 
 pfMap.tooltip = CreateFrame("Frame" , "pfMapTooltip", GameTooltip)
 pfMap.tooltip:SetScript("OnShow", function()
@@ -499,6 +513,8 @@ function pfMap:AddNode(meta)
 
       -- add new item and exit
       table.insert(pfMap.nodes[addon][map][coords][title].item, item)
+      pfMap:MarkNodesChanged("add-node-item")
+      pfMap.queue_update = GetTime()
       return
     end
 
@@ -548,6 +564,7 @@ function pfMap:AddNode(meta)
     pfMap.tooltips[spawn][title][map] = pfMap.tooltips[spawn][title][map] or similar_nodes[sindex]
   end
 
+  pfMap:MarkNodesChanged("add-node")
   pfMap.queue_update = GetTime()
 end
 
@@ -568,6 +585,8 @@ function pfMap:GetNodes(addon, title)
 end
 
 function pfMap:DeleteNode(addon, title)
+  local changed = false
+
   -- remove tooltips
   if not addon then
     pfMap.tooltips = {}
@@ -583,14 +602,17 @@ function pfMap:DeleteNode(addon, title)
 
   -- remove nodes
   if not addon then
+    changed = not IsEmpty(pfMap.nodes)
     pfMap.nodes = {}
   elseif not title then
+    changed = pfMap.nodes[addon] and not IsEmpty(pfMap.nodes[addon]) or false
     pfMap.nodes[addon] = {}
   elseif pfMap.nodes[addon] then
     for map, foo in pairs(pfMap.nodes[addon]) do
       for coords, node in pairs(pfMap.nodes[addon][map]) do
         if pfMap.nodes[addon][map][coords][title] then
           pfMap.nodes[addon][map][coords][title] = nil
+          changed = true
           if IsEmpty(pfMap.nodes[addon][map][coords]) then
             pfMap.nodes[addon][map][coords] = nil
           end
@@ -599,6 +621,9 @@ function pfMap:DeleteNode(addon, title)
     end
   end
 
+  if changed then
+    pfMap:MarkNodesChanged("delete-node")
+  end
   pfMap.queue_update = GetTime()
 end
 
@@ -1057,9 +1082,29 @@ pfMap:SetScript("OnEvent", function()
     end
   end
 
-  -- update nodes on world map changes
-  if event == "WORLD_MAP_UPDATE" and last_zone ~= zone then
-    pfMap.UpdateNodes()
+  -- Render the selected surface synchronously. The live Emberveil client does
+  -- not reliably service a deferred-only refresh while its full-screen map is
+  -- open, which left correctly-built quest nodes invisible until /koquest map.
+  -- A trailing refresh still coalesces native selection/layout transitions.
+  if event == "WORLD_MAP_UPDATE" then
+    if QuestieEV and QuestieEV.RefreshWorldMapSelection then
+      QuestieEV.worldMapEventCount = (QuestieEV.worldMapEventCount or 0) + 1
+      local qevWorldNow = GetTime()
+      if not QuestieEV.worldMapImmediateNextAt
+          or qevWorldNow >= QuestieEV.worldMapImmediateNextAt then
+        QuestieEV.worldMapImmediateNextAt = qevWorldNow + .08
+        if QuestieEV:RefreshWorldMapSelection(true, true) then
+          QuestieEV.worldMapImmediateRuns = (QuestieEV.worldMapImmediateRuns or 0) + 1
+        end
+      else
+        QuestieEV.worldMapImmediateSkips = (QuestieEV.worldMapImmediateSkips or 0) + 1
+      end
+      if QuestieEV.RequestWorldMapRefresh then
+        QuestieEV:RequestWorldMapRefresh(.12, "pfmap-world-map-update-tail")
+      end
+    elseif last_zone ~= zone then
+      pfMap.UpdateNodes()
+    end
     last_zone = zone
   end
 end)

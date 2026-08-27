@@ -1,0 +1,9 @@
+## Interface: 11200
+## Title: |cff33ffccKoQuest|r Locale - Russian
+## Author: Shagu (pfQuest) + Emberveil compatibility port
+## Notes: Russian database pack for KoQuest. Loaded on demand.
+## Version: EV-2.0.0-beta1.21
+## LoadOnDemand: 1
+## X-KoQuest-Locale: ruRU
+
+init\ruRU.xml

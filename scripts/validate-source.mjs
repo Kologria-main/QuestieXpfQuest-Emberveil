@@ -4,8 +4,11 @@ import process from "node:process";
 import luaparse from "luaparse";
 
 const repo = path.resolve(import.meta.dirname, "..");
+const addonRoot = path.join(repo, "addon");
 const addon = path.join(repo, "addon", "pfQuest");
-const expectedVersion = "2.0.0-beta1.20";
+const localePacks = ["deDE", "esES", "frFR", "koKR", "ptBR", "ruRU", "zhCN", "zhTW"];
+const managedAddonNames = ["pfQuest", ...localePacks.map((locale) => `pfQuest_Locale_${locale}`)];
+const expectedVersion = "2.0.0-beta1.21";
 const failures = [];
 let parsedLua = 0;
 let totalFiles = 0;
@@ -43,12 +46,23 @@ function existsCaseInsensitive(candidate) {
   return fs.existsSync(current);
 }
 
-if (!fs.existsSync(addon)) {
-  console.error(`Missing addon source: ${addon}`);
+if (!fs.existsSync(addonRoot)) {
+  console.error(`Missing addon source: ${addonRoot}`);
   process.exit(1);
 }
 
-const files = walk(addon);
+for (const addonName of managedAddonNames) {
+  const directory = path.join(addonRoot, addonName);
+  if (!fs.existsSync(directory)) fail(`missing managed addon folder: addon/${addonName}`);
+}
+const unexpectedAddonFolders = fs.readdirSync(addonRoot, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && !managedAddonNames.includes(entry.name));
+for (const entry of unexpectedAddonFolders) fail(`unmanaged addon folder: addon/${entry.name}`);
+
+const files = managedAddonNames
+  .map((addonName) => path.join(addonRoot, addonName))
+  .filter((directory) => fs.existsSync(directory))
+  .flatMap(walk);
 for (const file of files) {
   const stat = fs.statSync(file);
   totalFiles += 1;
@@ -83,19 +97,51 @@ if (!tocText.includes(`## Version: EV-${expectedVersion}`)) {
 }
 const packageMetadata = JSON.parse(fs.readFileSync(path.join(repo, "package.json"), "utf8"));
 if (packageMetadata.version !== expectedVersion) fail("package.json version mismatch");
+if (!packageMetadata.scripts?.validate?.includes("scripts/run-lua-tests.mjs")) {
+  fail("Lua tests are not using the strict Fengari result wrapper");
+}
 for (const [file, pattern] of [
   [path.join(repo, "installer", "Install-Questie-Emberveil.ps1"), `$Version = '${expectedVersion}'`],
   [path.join(repo, "scripts", "build-release.ps1"), `[string]$Version = '${expectedVersion}'`],
+  [path.join(repo, "scripts", "build-discord-release.ps1"), `[string]$Version = '${expectedVersion}'`],
   [path.join(repo, "INSTALL_KOQUEST_LINUX.sh"), `VERSION='${expectedVersion}'`],
 ]) {
   if (!fs.readFileSync(file, "utf8").includes(pattern)) fail(`${rel(file)} version mismatch`);
 }
 
-for (const rawLine of tocText.split(/\r?\n/)) {
-  const line = rawLine.trim();
-  if (!line || line.startsWith("#")) continue;
-  const candidate = path.join(addon, line.replaceAll("\\", path.sep));
-  if (!existsCaseInsensitive(candidate)) fail(`pfQuest.toc references missing path: ${line}`);
+function runtimeTocLines(text) {
+  return text.split(/\r?\n/).map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+function validateToc(addonName, text) {
+  const directory = path.join(addonRoot, addonName);
+  for (const line of runtimeTocLines(text)) {
+    const candidate = path.join(directory, line.replaceAll("\\", path.sep));
+    if (!existsCaseInsensitive(candidate)) fail(`${addonName}.toc references missing path: ${line}`);
+  }
+}
+
+validateToc("pfQuest", tocText);
+if (!runtimeTocLines(tocText).includes("init\\enUS.xml")) fail("pfQuest.toc does not load the English fallback");
+for (const locale of localePacks) {
+  if (runtimeTocLines(tocText).includes(`init\\${locale}.xml`)) {
+    fail(`pfQuest.toc eagerly loads ${locale}`);
+  }
+  const addonName = `pfQuest_Locale_${locale}`;
+  const localeTocPath = path.join(addonRoot, addonName, `${addonName}.toc`);
+  if (!fs.existsSync(localeTocPath)) {
+    fail(`missing locale TOC: ${rel(localeTocPath)}`);
+    continue;
+  }
+  const localeToc = fs.readFileSync(localeTocPath, "utf8");
+  if (!localeToc.includes(`## Version: EV-${expectedVersion}`)) fail(`${addonName}.toc version mismatch`);
+  if (!/^## LoadOnDemand:\s*1\s*$/m.test(localeToc)) fail(`${addonName} is not load-on-demand`);
+  if (!localeToc.includes(`## X-KoQuest-Locale: ${locale}`)) fail(`${addonName} locale metadata mismatch`);
+  const localeRuntime = runtimeTocLines(localeToc);
+  if (localeRuntime.length !== 1 || localeRuntime[0] !== `init\\${locale}.xml`) {
+    fail(`${addonName} must load only its base locale XML`);
+  }
+  validateToc(addonName, localeToc);
 }
 
 for (const xml of files.filter((file) => path.extname(file).toLowerCase() === ".xml")) {
@@ -122,7 +168,7 @@ function topLevelNumericIds(file) {
 for (const dataset of localizedDatasets) {
   const baseIds = topLevelNumericIds(path.join(addon, "db", "enUS", `${dataset}.lua`));
   for (const locale of requestedLocales) {
-    const localizedIds = topLevelNumericIds(path.join(addon, "db", locale, `${dataset}.lua`));
+    const localizedIds = topLevelNumericIds(path.join(addonRoot, `pfQuest_Locale_${locale}`, "db", locale, `${dataset}.lua`));
     const missing = [...baseIds].filter((id) => !localizedIds.has(id));
     if (missing.length) {
       fail(`${locale}/${dataset} omits ${missing.length} enUS record(s), first ID ${missing[0]}`);
@@ -165,14 +211,21 @@ for (const { file, source } of sourceFiles) {
 }
 
 const compat = fs.readFileSync(path.join(addon, "compat", "emberveil.lua"), "utf8");
+const localeLoader = fs.readFileSync(path.join(addon, "locale_loader.lua"), "utf8");
+const map = fs.readFileSync(path.join(addon, "map.lua"), "utf8");
 const mapEngine = fs.readFileSync(path.join(addon, "emberveil_map.lua"), "utf8");
 const quest = fs.readFileSync(path.join(addon, "quest.lua"), "utf8");
 const tracker = fs.readFileSync(path.join(addon, "tracker.lua"), "utf8");
 const database = fs.readFileSync(path.join(addon, "database.lua"), "utf8");
 const config = fs.readFileSync(path.join(addon, "config.lua"), "utf8");
+const discordBuilder = fs.readFileSync(path.join(repo, "scripts", "build-discord-release.ps1"), "utf8");
 
 const contracts = [
   [compat.includes(`EV.version = "${expectedVersion}"`), "compatibility-layer version mismatch"],
+  [localeLoader.includes(`function EV:LoadLocaleDatabase`), "load-on-demand locale loader missing"],
+  [localeLoader.includes(`pcall(LoadAddOn, pack)`), "locale packs are not safely loaded on demand"],
+  [localeLoader.includes(`ClearPartialLocale(locale)`), "partial locale loads are not cleared"],
+  [localeLoader.includes(`SetStartupStatus(locale, "enUS"`), "locale loader lacks explicit English fallback diagnostics"],
   [compat.includes(`if complete == -1 then return "failed" end`), "failed quest state is not preserved"],
   [compat.includes(`return self:GetQuestLogEntryState(qlogid) == "complete"`), "canonical completion gate missing"],
   [compat.includes(`self.questHistoryAuthoritative = true`), "authoritative completed-history state missing"],
@@ -186,12 +239,15 @@ const contracts = [
   [database.includes(`objectiveType == "gobject"`), "Emberveil game-object objective handling missing"],
   [database.includes(`renderEnder = false`), "premature active-quest ender markers are not gated"],
   [database.includes(`table.getn(bestIDs) ~= 1`), "ambiguous quest-ID resolver is not fail-closed"],
+  [database.includes(`local function GetQuestTitleMatch`), "lazy exact-title quest index missing"],
+  [database.includes(`questTitleIndexSource ~= source`), "quest-title index does not track its locale source"],
   [!database.includes(`ttitle = data.T`), "active quest resolver still fuzzy-maps unknown titles"],
   [!database.includes(`GetQuestLink(`), "active quest resolver still depends on GetQuestLink"],
   [quest.includes(`"REMOVE", data.state`), "quest removal omits previous canonical state"],
   [quest.includes(`local HookGetQuestReward = GetQuestReward`), "fast quest-turn-in capture missing"],
   [quest.includes(`state = state .. "|state=" .. evState`), "quest fingerprint omits three-state status"],
   [quest.includes(`snapshotComplete ~= false`), "quest removals are not gated on a complete log snapshot"],
+  [quest.includes(`QuestieEV:LoadLocaleDatabase(locale, "translation")`), "translation menu does not load locale packs on demand"],
   [tracker.includes(`if snapshotComplete == false then return end`), "tracker does not preserve collapsed quests"],
   [tracker.includes(`local evFailed = evState == "failed"`), "tracker lacks failed-state rendering"],
   [database.includes(`GetBitByRace(race, raceID)`), "numeric race ID support missing"],
@@ -201,6 +257,13 @@ const contracts = [
   [mapEngine.includes(`EV.minimapEnvironmentSource = "verified-outdoor-only"`), "measured outdoor-only minimap scale policy missing"],
   [mapEngine.includes(`function EV:CaptureMinimapPlayerPosition()`), "20 Hz minimap position fast path missing"],
   [mapEngine.includes(`pin.qevVisualKey ~= visualKey`), "minimap visual metadata cache missing"],
+  [map.includes(`function pfMap:MarkNodesChanged`), "pfMap node revision hook missing"],
+  [map.includes(`pfMap:MarkNodesChanged("add-node-item")`), "item mutation does not invalidate map caches"],
+  [map.includes(`pfMap:MarkNodesChanged("delete-node")`), "node deletion does not invalidate map caches"],
+  [mapEngine.includes(`cache.nodeRevision == nodeRevision`), "node cache ignores pfMap revision"],
+  [mapEngine.includes(`function EV:RequestWorldMapRefresh`), "world-map event coalescing missing"],
+  [mapEngine.includes(`function EV:ServiceWorldMapRefresh`), "world-map final-selection service missing"],
+  [mapEngine.includes(`EV:RefreshWorldMapSelection(false, shown)`), "world-map selection fallback missing"],
   [mapEngine.includes(`local denseMode = totalNodes > 450`), "dense-zone world-map compaction missing"],
   [mapEngine.includes(`WORLD_OBJECTIVE_PIN_BUDGET = 320`), "world-map objective pin budget missing"],
   [mapEngine.includes(`function EV:GetWorldRenderEntries`), "hoverable world-map objective cache missing"],
@@ -222,6 +285,11 @@ const contracts = [
   [!mapEngine.includes(`RenderWorldDots`), "non-hoverable world-map dot layer is still present"],
   [config.includes(`default = "1", type = "checkbox", config = "unverifiedquestgivers"`), "available quest givers are not enabled by default"],
   [config.includes(`pfQuest_config["availabilitydefaultv2"]`), "available quest-giver upgrade migration missing"],
+  [packageMetadata.scripts?.["build:discord"]?.includes("build-discord-release.ps1"), "Discord build command missing"],
+  [discordBuilder.includes(`[long]$MaxBytes = 20000000`), "Discord archive lacks a strict 20 MB ceiling"],
+  [discordBuilder.includes(`'-xr!assets'`), "Discord archive does not exclude repository-only assets"],
+  [discordBuilder.includes(`'-m0=lzma2:d=64m'`), "Discord archive compression contract missing"],
+  [discordBuilder.includes(`-ValidateOnly`), "Discord archive does not validate its extracted installer"],
   [!mapEngine.includes(`math.floor((xPlayer - maxDx) / cellSize) - 1`), "minimap query retains an unnecessary border"],
 ];
 for (const [passed, message] of contracts) if (!passed) fail(message);

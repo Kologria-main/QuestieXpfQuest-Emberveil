@@ -1,8 +1,8 @@
 # Installation
 
-Download `KoQuest_Emberveil_v2.0.0-beta1.20.zip` from this repository's GitHub release, extract the entire ZIP to a normal folder, and exit Emberveil completely before installing.
+Download `KoQuest_Emberveil_v2.0.0-beta1.21.zip` from this repository's GitHub release, extract the entire ZIP to a normal folder, and exit Emberveil completely before installing. The Discord-friendly `KoQuest_Emberveil_v2.0.0-beta1.21_Discord.7z` contains the same installer, addon payload, and locale packs while omitting only repository screenshots. Extract the `.7z` with Windows 11 or 7-Zip before continuing; do not launch the installer from inside an archive viewer.
 
-The public name is KoQuest. The installed folder remains `pfQuest` so upgrades preserve the engine's settings, history, and compatibility with existing installs.
+The public name is KoQuest. The core installed folder remains `pfQuest` so upgrades preserve the engine's settings, history, and compatibility with existing installs. Eight `pfQuest_Locale_<locale>` folders contain load-on-demand database packs; the core loads only the current client locale and keeps English as its fallback.
 
 ## Windows
 
@@ -13,7 +13,7 @@ The readable PowerShell installer:
 - makes no network requests;
 - verifies the bundled payload against `installer/payload-manifest.sha256`;
 - rejects executable content inside the addon;
-- backs up an existing `pfQuest` folder;
+- backs up existing `pfQuest` and managed locale-pack folders;
 - stages and verifies the replacement on the target volume;
 - restores the previous folder if installation fails.
 
@@ -61,19 +61,21 @@ Linux backups are placed under `${XDG_STATE_HOME:-$HOME/.local/state}/koquest/ba
 
 ## Manual installation
 
-Copy the release's `addon/pfQuest` folder into Emberveil's `Interface/AddOns` folder. The final layout must be:
+Copy every folder directly inside the release's `addon` directory into Emberveil's `Interface/AddOns` folder. Keep the core and all locale packs together. The final layout includes:
 
 ```text
 Interface/AddOns/pfQuest/pfQuest.toc
 Interface/AddOns/pfQuest/compat/emberveil.lua
 Interface/AddOns/pfQuest/emberveil_map.lua
+Interface/AddOns/pfQuest_Locale_koKR/pfQuest_Locale_koKR.toc
+Interface/AddOns/pfQuest_Locale_ruRU/pfQuest_Locale_ruRU.toc
 ```
 
-Do not create a double-nested `pfQuest/pfQuest` folder.
+Do not create a double-nested `pfQuest/pfQuest` or `addon/addon` folder. Locale packs are installed but remain dormant unless KoQuest requests the matching client locale.
 
 ## Upgrade, rollback, and uninstall
 
 - Upgrade: exit Emberveil and run the new release installer. SavedVariables are not deleted.
-- Windows rollback: copy a backed-up `pfQuest` folder from `%LOCALAPPDATA%\QuestieEV\Backups` into `Interface\AddOns`.
-- Linux rollback: copy a backup from `${XDG_STATE_HOME:-$HOME/.local/state}/koquest/backups` into `Interface/AddOns`.
-- Uninstall: exit Emberveil and delete only `Interface/AddOns/pfQuest`. Remove `pfQuest` SavedVariables separately only if you deliberately want to reset all settings and history.
+- Windows rollback: copy the backed-up `pfQuest` and `pfQuest_Locale_<locale>` folders from `%LOCALAPPDATA%\QuestieEV\Backups` into `Interface\AddOns`.
+- Linux rollback: copy the backed-up managed folders from `${XDG_STATE_HOME:-$HOME/.local/state}/koquest/backups` into `Interface/AddOns`.
+- Uninstall: exit Emberveil and delete only `Interface/AddOns/pfQuest` plus the eight KoQuest `pfQuest_Locale_<locale>` folders. Remove `pfQuest` SavedVariables separately only if you deliberately want to reset all settings and history.

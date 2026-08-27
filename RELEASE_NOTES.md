@@ -1,4 +1,61 @@
-# KoQuest 2.0.0-beta1.20 — Interactive World-Map Objectives
+# KoQuest 2.0.0-beta1.21 — Fast Locale Loading and Reliable Map Refresh
+
+This update removes the largest avoidable startup cost and fixes the map-event
+race that could leave a valid zone with no KoQuest icons until `/koquest map`
+was run manually.
+
+The Discord distribution is a compact `.7z` under 20 MB. It retains the same
+verified installer, complete addon payload, and all locale packs as the normal
+ZIP, while omitting only repository screenshots that are not installed in game.
+
+## Performance changes
+
+- The core keeps the English fallback database resident and loads only the
+  active non-English locale pack on demand. The other seven translations are
+  not parsed or scanned during startup.
+- If Emberveil initially records that active pack as disabled, KoQuest enables
+  and retries only that pack once. It does not modify account JSON or load the
+  inactive translations.
+- Exact localized quest-title matching now builds its index only when needed
+  and reuses it until the database revision changes.
+- Unchanged node generations and compacted dense-map render sets are reused
+  across UI refreshes instead of being flattened and regrouped repeatedly.
+- Refresh work is event-driven and bounded. A map-event burst performs at most
+  one immediate render per 80 ms window plus one coalesced trailing refresh.
+
+## Map fix
+
+- `WORLD_MAP_UPDATE` now renders synchronously while the selected zone and map
+  surface are valid, so opening the full-screen map no longer depends on a
+  timer surviving the client's transition sequence.
+- Selection is sampled once per render. Transient unresolved selections, empty
+  zone lists, and map surfaces smaller than 16 pixels are deferred without
+  committing a stale cache key or permanently hiding the pin pool.
+- `/koquest` reports refresh events, immediate runs/skips, deferred runs,
+  retries, the last result, selected map/key, and map dimensions.
+
+## Live result
+
+The beta1.21 map runtime was installed into the Emberveil live client and tested
+on the level 40 character Rom in Dustwallow Marsh. Opening the map without a
+manual refresh displayed four quest-giver icons. Moving out to the Kalimdor
+continent cleared the zone-only icons, and selecting Dustwallow again
+repopulated all four automatically. Diagnostics reported six map events, four
+immediate renders, two bounded burst skips, no deferred retries, and a
+successful 1002x668 map render.
+
+After that live pass, only version/release metadata and the disabled active-pack
+locale recovery were added; neither changes the English map path. The final
+302-file beta1.21 candidate was then installed transactionally and independently
+rehashed against its manifest.
+
+The complete payload passed Lua 5.1 parsing, locale coverage,
+quest-state, on-demand locale, title-index, map-runtime, Windows install/upgrade,
+rollback/tamper rejection, Linux install, and ZIP integrity validation.
+
+---
+
+# Previous: 2.0.0-beta1.20 — Interactive World-Map Objectives
 
 This patch restores the small colored objective circles players expected on the
 Westfall world map without bringing back the earlier non-interactive dot layer

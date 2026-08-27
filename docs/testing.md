@@ -14,11 +14,17 @@ Every release must pass:
   collapsed-header preservation, localized title cleanup, numeric race/class IDs,
   and debounced zoom projection.
 - Executed quest-state scenarios using the real compatibility layer: explicit completion, explicit failure, finished counters without quest-level completion, zero-objective quests, numeric zero, invalid indices, API-error fail-closed behavior, local-history gating, server-snapshot gating, abandoned/failed removal, fast reward turn-in, and stale post-turn-in snapshot handling.
+- Executed locale-loading scenarios: one active pack per startup, English fallback, unsupported/disabled packs, partial-load cleanup, and later translation-menu loading. Executed quest-title-index scenarios prove one full build followed by indexed hits and explicit reload invalidation.
+- Executed map-runtime scenarios using the real pfMap mutators and Emberveil
+  cache helpers: same-map add/delete invalidation, duplicate no-op revisions,
+  dense objective compaction, rapid zone/continent/zone selection, changed-map
+  throttle bypass, native event coalescing, and same-map reopen rendering.
 - Full SHA-256 payload-manifest verification.
 - ruRU, zhCN, and zhTW coverage checks requiring every base enUS item, unit, quest, zone, profession, and object ID.
 - Windows installer validation-only, isolated SavedVariables repair, clean install, upgrade/backup, exact installed-hash comparison, and invalid-payload rejection in an isolated test game tree.
 - Linux installer shell parsing, offline hash verification, isolated installation, and exact installed-hash comparison.
 - Release ZIP entry traversal checks, duplicate-path checks, full decompression/CRC read, required-file checks, and SHA-256 generation.
+- Compact Discord archive integrity, required-entry, extracted-installer, and strict sub-20,000,000-byte checks. Repository-only screenshots may be omitted; addon files and locale packs may not be omitted.
 
 ## In-game acceptance matrix
 
@@ -28,7 +34,7 @@ The maintainer should confirm these on the current public Emberveil client befor
 2. Outdoor movement across a subzone boundary.
 3. Enter/leave an inn or building with zoom changes.
 4. Manual minimap zoom at every zoom index.
-5. Browse world, continent, current-zone, and another-zone maps without corrupting current minimap pins.
+5. Browse world, continent, current-zone, and another-zone maps without corrupting current minimap pins. Rapidly switch zone A to zone B and zone A to continent back to zone A; the final view must always repaint its pins.
 6. Accept, progress, complete, fail, abandon, and turn in quests, including a zero-objective talk/exploration quest.
 7. Relog with previously completed quests and verify `/koquest` synchronization
    source. If `historyAuthoritative=false`, verify automatic available starters

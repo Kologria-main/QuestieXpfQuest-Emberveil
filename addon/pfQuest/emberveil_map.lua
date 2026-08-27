@@ -1,5 +1,5 @@
 -- KoQuest for Emberveil / pfQuest map engine
--- v2.0.0-beta1.20
+-- v2.0.0-beta1.21
 --
 -- Design:
 --   * pfQuest database + quest parser
@@ -107,6 +107,7 @@ EV.minimapNextAt = nil
 EV.minimapForceNext = true
 EV.minimapNodeCache = EV.minimapNodeCache or {
   mapID = nil,
+  nodeRevision = nil,
   entries = {},
   grid = {},
   cellSize = 2.5,
@@ -117,6 +118,19 @@ EV.minimapNodeCache = EV.minimapNodeCache or {
 EV.worldMapNextAt = nil
 EV.worldMapForceNext = true
 EV.worldMapWasShown = false
+EV.worldMapRefreshAt = nil
+EV.worldMapRefreshReason = nil
+EV.worldMapEventCount = 0
+EV.worldMapImmediateRuns = 0
+EV.worldMapImmediateSkips = 0
+EV.worldMapImmediateNextAt = nil
+EV.worldMapDeferredCount = 0
+EV.worldMapRetryCount = 0
+EV.worldMapLastResult = "startup"
+EV.worldMapLastMapID = nil
+EV.worldMapLastKey = nil
+EV.worldMapLastWidth = nil
+EV.worldMapLastHeight = nil
 EV.worldNodeCache = EV.worldNodeCache or {
   mapID = nil,
   generation = nil,
@@ -214,11 +228,20 @@ end
 
 function EV:MarkMinimapNodeCacheDirty(reason)
   self.minimapNodeCache = self.minimapNodeCache or {
-    mapID = nil, entries = {}, grid = {}, cellSize = 2.5,
+    mapID = nil, nodeRevision = nil, entries = {}, grid = {}, cellSize = 2.5,
     dirty = true, reason = "init", generation = 0,
   }
   self.minimapNodeCache.dirty = true
   self.minimapNodeCache.reason = reason or "unknown"
+  self.minimapForceNext = true
+end
+
+-- The shared pfMap mutators call this only after an actual structural change.
+-- Cache invalidation stays O(1); the flattened/spatial tables rebuild once on
+-- the next requested render after a synchronous node transaction completes.
+function EV:NotifyMapNodesChanged(reason)
+  self:MarkMinimapNodeCacheDirty("map-nodes:" .. tostring(reason or "changed"))
+  self.worldMapForceNext = true
   self.minimapForceNext = true
 end
 
@@ -245,13 +268,15 @@ function EV:GetMinimapNodeCache(mapID)
   local cache = self.minimapNodeCache
   if not cache then
     cache = {
-      mapID = nil, entries = {}, grid = {}, cellSize = 2.5,
+      mapID = nil, nodeRevision = nil, entries = {}, grid = {}, cellSize = 2.5,
       dirty = true, reason = "init", generation = 0,
     }
     self.minimapNodeCache = cache
   end
 
-  if cache.mapID == mapID and not cache.dirty then return cache end
+  local nodeRevision = pfMap and tonumber(pfMap.nodeRevision) or 0
+  if cache.mapID == mapID and cache.nodeRevision == nodeRevision
+      and not cache.dirty then return cache end
 
   local entries = {}
   local grid = {}
@@ -286,6 +311,7 @@ function EV:GetMinimapNodeCache(mapID)
   end
 
   cache.mapID = mapID
+  cache.nodeRevision = nodeRevision
   cache.entries = entries
   cache.grid = grid
   cache.dirty = false
@@ -540,13 +566,17 @@ function EV:GetSelectedMapID()
       local zones = type(GetMapZones) == "function" and { pcall(GetMapZones, cid) } or {}
       if zones[1] then
         table.remove(zones, 1)
-        self.mapZoneCache[cid] = zones
-      else
-        self.mapZoneCache[cid] = {}
+        -- The Unreal map bridge can briefly report a successful call with no
+        -- zone names while the world-map widgets are changing views. Caching
+        -- that empty transition poisons this continent for the whole session.
+        if table.getn(zones) > 0 then
+          self.mapZoneCache[cid] = zones
+        end
       end
     end
 
-    local name = self.mapZoneCache[cid][mid]
+    local zoneList = self.mapZoneCache[cid]
+    local name = zoneList and zoneList[mid] or nil
     local mapID = name and self:GetMapIDByZoneName(name) or nil
 
     if mapID then
@@ -576,6 +606,85 @@ function EV:IsWorldMapShown()
   if not WorldMapFrame or type(WorldMapFrame.IsShown) ~= "function" then return false end
   local ok, shown = pcall(WorldMapFrame.IsShown, WorldMapFrame)
   return ok and shown and true or false
+end
+
+local function WorldMapSelectionKey(mapID, cid, mid, mapInfo)
+  return tostring(cid) .. ":" .. tostring(mid) .. ":"
+    .. tostring(mapInfo) .. ":" .. tostring(mapID)
+end
+
+function EV:GetWorldMapSelectionKey()
+  local mapID, _, cid, mid, mapInfo = self:GetSelectedMapID()
+  return WorldMapSelectionKey(mapID, cid, mid, mapInfo)
+end
+
+-- Native map navigation may emit several WORLD_MAP_UPDATE events in one short
+-- transition. The event handler renders immediately for correctness; this
+-- trailing-edge deadline catches the final selection after the native widgets
+-- and their Unreal-backed layout have settled.
+function EV:RequestWorldMapRefresh(delay, reason)
+  delay = tonumber(delay) or .05
+  if delay < 0 then delay = 0 end
+
+  local due = GetTime() + delay
+  if not self.worldMapRefreshAt or due > self.worldMapRefreshAt then
+    self.worldMapRefreshAt = due
+  end
+  self.worldMapRefreshReason = reason or "world-map-update"
+end
+
+function EV:RefreshWorldMapSelection(force, shown)
+  if shown == nil then shown = self:IsWorldMapShown() end
+  if not shown then
+    self.lastSelectedKey = nil
+    return false
+  end
+
+  local mapID, _, cid, mid, mapInfo, viewKind = self:GetSelectedMapID()
+  local key = WorldMapSelectionKey(mapID, cid, mid, mapInfo)
+  if not force and key == self.lastSelectedKey then return false end
+  if not pfMap or type(pfMap.UpdateNodes) ~= "function" then return false end
+
+  -- A positive zone index with no resolved zone name is a transient native-map
+  -- state, not a continent view. Keep the previous pins and retry after layout.
+  if viewKind == "zone-unresolved" or viewKind == "unknown" then
+    self.worldMapDeferredCount = (self.worldMapDeferredCount or 0) + 1
+    self.worldMapLastResult = "deferred-selection"
+    self:RequestWorldMapRefresh(.12, "retry-selection")
+    return false
+  end
+
+  -- Selection changes must not be consumed by the ordinary 80 ms redraw
+  -- throttle. Render the exact selection snapshot and commit its key only when
+  -- the renderer confirms that the map surface was ready.
+  self.worldMapForceNext = true
+  local rendered, reason = pfMap:UpdateNodes(mapID, true)
+  if not rendered then
+    self.worldMapDeferredCount = (self.worldMapDeferredCount or 0) + 1
+    self.worldMapLastResult = "deferred-" .. tostring(reason or "render")
+    if reason == "layout" or reason == "selection" then
+      self.worldMapRetryCount = (self.worldMapRetryCount or 0) + 1
+      self:RequestWorldMapRefresh(.12, "retry-" .. tostring(reason))
+    end
+    return false
+  end
+
+  self.lastSelectedKey = key
+  self.worldMapLastKey = key
+  self.worldMapLastMapID = mapID
+  self.worldMapLastResult = "rendered"
+  return true
+end
+
+function EV:ServiceWorldMapRefresh(now)
+  if not self.worldMapRefreshAt then return false end
+  now = now or GetTime()
+  if now < self.worldMapRefreshAt then return false end
+
+  self.worldMapRefreshAt = nil
+  self.worldMapLastRefreshReason = self.worldMapRefreshReason
+  self.worldMapRefreshReason = nil
+  return self:RefreshWorldMapSelection(true)
 end
 
 -- Emberveil sometimes returns nil from both parent-zone APIs after /reload and
@@ -1057,19 +1166,36 @@ local function GetWorldObjectiveIdentity(node)
   return table.concat(parts, ";")
 end
 
-local function BuildWorldObjectiveBuckets(entries, cellSize)
-  local buckets = {}
+local function GetWorldObjectiveBucketKey(entry, cellSize)
+  local cx = math.floor(entry.x / cellSize)
+  local cy = math.floor(entry.y / cellSize)
+  return entry.worldObjectiveIdentity .. "|" .. tostring(cx) .. "|" .. tostring(cy)
+end
+
+local function CountWorldObjectiveBuckets(entries, cellSize)
+  local seen = {}
   local count = 0
 
   for _, entry in ipairs(entries) do
-    local cx = math.floor(entry.x / cellSize)
-    local cy = math.floor(entry.y / cellSize)
+    local key = GetWorldObjectiveBucketKey(entry, cellSize)
+    if not seen[key] then
+      seen[key] = true
+      count = count + 1
+    end
+  end
+
+  return count
+end
+
+local function BuildWorldObjectiveBuckets(entries, cellSize)
+  local buckets = {}
+
+  for _, entry in ipairs(entries) do
     -- Never merge unrelated spawns merely because their circles overlap.
     -- Keeping the quest/spawn/item identity in the bucket key preserves the
     -- exact tooltip meaning while still folding repeated coordinates for the
     -- same objective into a bounded number of buttons.
-    local identity = GetWorldObjectiveIdentity(entry.node)
-    local key = identity .. "|" .. tostring(cx) .. "|" .. tostring(cy)
+    local key = GetWorldObjectiveBucketKey(entry, cellSize)
     local bucket = buckets[key]
 
     if not bucket then
@@ -1082,7 +1208,6 @@ local function BuildWorldObjectiveBuckets(entries, cellSize)
         key = "objective|" .. key,
       }
       buckets[key] = bucket
-      count = count + 1
     end
 
     -- Display a real database coordinate, never the mathematical centre of a
@@ -1108,11 +1233,11 @@ local function BuildWorldObjectiveBuckets(entries, cellSize)
   end
 
   table.sort(grouped, function(a, b) return a.key < b.key end)
-  return grouped, count
+  return grouped
 end
 
-function EV:GetWorldRenderEntries(mapID, denseMode)
-  local nodeCache = self:GetMinimapNodeCache(mapID)
+function EV:GetWorldRenderEntries(mapID, denseMode, nodeCache)
+  nodeCache = nodeCache or self:GetMinimapNodeCache(mapID)
   local generation = nodeCache.generation or 0
   local cache = self.worldNodeCache
 
@@ -1134,6 +1259,10 @@ function EV:GetWorldRenderEntries(mapID, denseMode)
   local objectives = {}
   for _, entry in ipairs(nodeCache.entries) do
     if denseMode and entry.addon == "PFQUEST" and not IsWorldSummaryNode(entry.node) then
+      -- Entries are replaced on every node-cache generation, so this identity
+      -- remains valid until the next structural mutation and is computed once.
+      entry.worldObjectiveIdentity = entry.worldObjectiveIdentity
+        or GetWorldObjectiveIdentity(entry.node)
       objectives[table.getn(objectives) + 1] = entry
     else
       cache.entries[table.getn(cache.entries) + 1] = entry
@@ -1145,15 +1274,18 @@ function EV:GetWorldRenderEntries(mapID, denseMode)
   if denseMode and cache.objectiveSource > 0 then
     local budget = WORLD_OBJECTIVE_PIN_BUDGET - table.getn(cache.entries)
     if budget < 64 then budget = 64 end
-    local grouped = objectives
     local chosenSize = 0
 
     for _, cellSize in ipairs(WORLD_OBJECTIVE_GRID_STEPS) do
-      local candidate, candidateCount = BuildWorldObjectiveBuckets(objectives, cellSize)
-      grouped = candidate
+      local candidateCount = CountWorldObjectiveBuckets(objectives, cellSize)
       chosenSize = cellSize
       if candidateCount <= budget then break end
     end
+
+    -- Build metadata and sort only for the selected grid. Rejected candidate
+    -- sizes need only an identity-key count, avoiding thousands of temporary
+    -- node tables and repeated sorts in dense zones.
+    local grouped = BuildWorldObjectiveBuckets(objectives, chosenSize)
 
     for _, entry in ipairs(grouped) do
       cache.entries[table.getn(cache.entries) + 1] = entry
@@ -1194,12 +1326,43 @@ function EV:InvalidateMinimapPinVisuals(reason)
   self.minimapVisualResetCount = (self.minimapVisualResetCount or 0) + 1
 end
 
-function pfMap:UpdateNodes()
-  if type(pfQuest_config) ~= "table" then return end
+function pfMap:UpdateNodes(selectedMapID, selectionResolved)
+  if type(pfQuest_config) ~= "table" then return false, "config" end
+
+  local map = selectedMapID
+  local viewKind = nil
+  if not selectionResolved then
+    map, _, _, _, _, viewKind = EV:GetSelectedMapID()
+    if viewKind == "zone-unresolved" or viewKind == "unknown" then
+      return false, "selection"
+    end
+  end
+
+  -- Emberveil can fire WORLD_MAP_UPDATE before the Unreal-backed map button
+  -- receives its final dimensions. Do not consume the selection or stack pins
+  -- at 0,0; a bounded trailing refresh will retry once layout is usable.
+  local worldWidth, worldHeight = nil, nil
+  if map then
+    if not WorldMapButton
+        or type(WorldMapButton.GetWidth) ~= "function"
+        or type(WorldMapButton.GetHeight) ~= "function" then
+      return false, "layout"
+    end
+
+    worldWidth = WorldMapButton:GetWidth()
+    worldHeight = WorldMapButton:GetHeight()
+    EV.worldMapLastWidth = worldWidth
+    EV.worldMapLastHeight = worldHeight
+    if not Num(worldWidth) or not Num(worldHeight)
+        or worldWidth < 16 or worldHeight < 16 then
+      return false, "layout"
+    end
+  end
+
   local evNow = GetTime()
   if not EV.worldMapForceNext and EV.worldMapNextAt and evNow < EV.worldMapNextAt then
     EV.perf.worldSkips = (EV.perf.worldSkips or 0) + 1
-    return
+    return false, "throttled"
   end
   EV.worldMapForceNext = false
   EV.worldMapNextAt = evNow + .08
@@ -1210,13 +1373,16 @@ function pfMap:UpdateNodes()
       if pin and pin.Hide then pin:Hide() end
     end
     EV:UpdatePlayerMarker()
-    return
+    return false, "quest-state"
   end
 
   local color = pfQuest_config["spawncolors"] == "1" and "spawn" or "title"
-  local map = EV:GetSelectedMapID()
   local i = 1
-  local totalNodes = EV:CountNodesForMap(map)
+  -- The flattened cache already represents exactly the selected map across all
+  -- addons. Reuse its count instead of scanning pfMap.nodes once here and then
+  -- scanning it again when a cache generation must be rebuilt.
+  local nodeCache = map and EV:GetMinimapNodeCache(map) or nil
+  local totalNodes = nodeCache and table.getn(nodeCache.entries) or 0
   local denseMode = totalNodes > 450
   local renderedNodes = 0
   local suppressedNodes = 0
@@ -1232,7 +1398,7 @@ function pfMap:UpdateNodes()
   end
 
   if map then
-    local renderCache = EV:GetWorldRenderEntries(map, denseMode)
+    local renderCache = EV:GetWorldRenderEntries(map, denseMode, nodeCache)
     for _, entry in ipairs(renderCache.entries) do
       local addon = entry.addon
       local node = entry.node
@@ -1269,16 +1435,13 @@ function pfMap:UpdateNodes()
             end
           end
 
-          local w = WorldMapButton:GetWidth()
-          local h = WorldMapButton:GetHeight()
-
           pfMap.pins[i]:ClearAllPoints()
           pfMap.pins[i]:SetPoint(
             "CENTER",
             WorldMapButton,
             "TOPLEFT",
-            x / 100 * w,
-            -y / 100 * h
+            x / 100 * worldWidth,
+            -y / 100 * worldHeight
           )
           pfMap.pins[i]:Show()
         end
@@ -1308,6 +1471,7 @@ function pfMap:UpdateNodes()
   EV.perf.worldNodeSuppressed = suppressedNodes
 
   EV:UpdatePlayerMarker()
+  return true, "rendered"
 end
 
 -- =========================================================================
@@ -1677,6 +1841,19 @@ function EV:Diagnostic()
     .. " engine=" .. tostring(self.engine)
     .. " dbLocalized=" .. tostring(pfDatabase and pfDatabase.localized))
 
+  chat("locale requested=" .. tostring(self.localeRequested)
+    .. " loaded=" .. tostring(self.localeLoaded)
+    .. " status=" .. tostring(self.localeStatus)
+    .. " pack=" .. tostring(self.localePack)
+    .. " fallback=" .. tostring(self.localeFallback)
+    .. " error=" .. tostring(self.localeError))
+
+  chat("questTitleIndex builds=" .. tostring(pfDatabase and pfDatabase.questTitleIndexBuilds or 0)
+    .. " lookups=" .. tostring(pfDatabase and pfDatabase.questTitleIndexLookups or 0)
+    .. " hits=" .. tostring(pfDatabase and pfDatabase.questTitleIndexHits or 0)
+    .. " entries=" .. tostring(pfDatabase and pfDatabase.questTitleIndexEntries or 0)
+    .. " duplicates=" .. tostring(pfDatabase and pfDatabase.questTitleIndexDuplicates or 0))
+
   local loc = self:RefreshLocationContext()
   local activeNodeQuests, coveredNodeQuests, missingNodeQuests =
     self:GetActiveQuestNodeCoverage()
@@ -1775,6 +1952,18 @@ function EV:Diagnostic()
     .. " objectives=" .. tostring(perf.worldObjectiveRendered or 0)
     .. "/" .. tostring(perf.worldObjectiveSource or 0)
     .. " grid=" .. tostring(perf.worldObjectiveCellSize or 0))
+
+  chat("worldRefresh events=" .. tostring(self.worldMapEventCount or 0)
+    .. " immediate=" .. tostring(self.worldMapImmediateRuns or 0)
+    .. "/" .. tostring(self.worldMapImmediateSkips or 0)
+    .. " deferred=" .. tostring(self.worldMapDeferredCount or 0)
+    .. " retries=" .. tostring(self.worldMapRetryCount or 0)
+    .. " pending=" .. tostring(self.worldMapRefreshAt ~= nil)
+    .. " last=" .. tostring(self.worldMapLastResult)
+    .. " map=" .. tostring(self.worldMapLastMapID)
+    .. " key=" .. tostring(self.worldMapLastKey)
+    .. " size=" .. tostring(self.worldMapLastWidth)
+    .. "x" .. tostring(self.worldMapLastHeight))
 
   local qevZoom = nil
   if Minimap and type(Minimap.GetZoom) == "function" then
@@ -1906,6 +2095,10 @@ driver:SetScript("OnEvent", function()
     EV.renderPrimeAt = nil
     EV.renderPrimeUntil = nil
     EV.questRenderNudgeAt = nil
+    EV.worldMapRefreshAt = nil
+    EV.worldMapRefreshReason = nil
+    EV.worldMapImmediateNextAt = nil
+    EV.lastSelectedKey = nil
     EV.mapContextPrimeAt = nil
     EV.mapContextPrimeCooldownUntil = nil
     EV.mapContextPrimeBusy = false
@@ -1931,6 +2124,10 @@ driver:SetScript("OnEvent", function()
     EV.mapContextProbeAttempted = false
     EV.mapContextProbe = nil
     EV.mapContextProbeCount = 0
+    EV.worldMapRefreshAt = nil
+    EV.worldMapRefreshReason = nil
+    EV.worldMapImmediateNextAt = nil
+    EV.lastSelectedKey = nil
     EV:MarkMinimapNodeCacheDirty("player-entering-world")
     EV.worldMapForceNext = true
     EV.renderPrimeRequested = true
@@ -2017,6 +2214,7 @@ driver:SetScript("OnEvent", function()
 
   if event == "WORLD_MAP_UPDATE" then
     this.captureAt = GetTime() + .15
+    EV:RequestWorldMapRefresh(.12, "WORLD_MAP_UPDATE-tail")
 
     if not EV.mapContextPrimeBusy
         and not EV.mapContextProbe
@@ -2083,6 +2281,11 @@ driver:SetScript("OnUpdate", function()
       if EV:IsWorldMapShown() and pfMap.UpdateNodes then pfMap:UpdateNodes() end
     end
   end
+
+  -- Service native map-selection bursts independently of the 200 ms
+  -- maintenance tick. The service forces one redraw of the latest selection,
+  -- so an 80 ms world-render throttle can never consume the final state.
+  EV:ServiceWorldMapRefresh(now)
 
   if (this.tick or 0) > now then return end
   this.tick = now + .20
@@ -2182,15 +2385,9 @@ driver:SetScript("OnUpdate", function()
     EV:CapturePlayerPosition(false)
   end
 
-  local mapID, _, cid, mid, mapInfo = EV:GetSelectedMapID()
-  local key = tostring(cid) .. ":" .. tostring(mid) .. ":" .. tostring(mapInfo) .. ":" .. tostring(mapID)
-
-  if shown and key ~= EV.lastSelectedKey then
-    EV.lastSelectedKey = key
-    if pfMap then pfMap:UpdateNodes() end
-  elseif not shown then
-    EV.lastSelectedKey = nil
-  end
+  -- Polling remains as a fallback for clients that omit WORLD_MAP_UPDATE. A
+  -- changed key is forced through the renderer before it is committed.
+  EV:RefreshWorldMapSelection(false, shown)
 
   EV:UpdatePlayerMarker()
 

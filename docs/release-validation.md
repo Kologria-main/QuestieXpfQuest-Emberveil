@@ -1,4 +1,68 @@
-# Release validation: 2.0.0-beta1.20
+# Release validation: 2.0.0-beta1.21
+
+Validation date: 2026-08-26
+
+Target: Emberveil live client 1.12.1, Windows x64
+
+## Release result
+
+`2.0.0-beta1.21` passed the source, runtime-scenario, localization-coverage,
+package, installer, and payload-integrity gates. The exact packaged candidate
+was installed transactionally into the path-qualified Emberveil client after
+the game and launcher were closed. All 302 installed files matched the release
+manifest.
+
+## Automated evidence
+
+- All 147 runtime Lua files parse as Lua 5.1.
+- Core and locale-pack TOC/XML references, version contracts, source safety
+  contracts, and required release files pass validation.
+- Runtime scenarios cover quest-state synchronization, requested-locale
+  loading/fallback, disabled active-pack recovery, lazy exact-title indexing,
+  map-selection caching, zero-size layout recovery, trailing-edge refresh
+  coalescing, and immediate `WORLD_MAP_UPDATE` rendering.
+- Every non-English database is packaged in one of eight sibling
+  `LoadOnDemand` addons; the English fallback remains in the core.
+- The 302-file manifest rejects undeclared, missing, and modified files.
+- Windows clean install, upgrade/backup, scoped SavedVariables repair,
+  rollback, and tamper rejection pass in isolated trees.
+- Linux shell syntax, staging, hash verification, install, and installed-copy
+  verification pass in an isolated tree.
+- The release ZIP passes path traversal, duplicate-path, decompression, CRC,
+  required-file, and exact-manifest checks.
+
+## Live-client evidence
+
+The live pass used the final beta1.21 map code. The only runtime change afterward
+was disabled active-locale pack recovery, which is outside the English map path;
+the final candidate was then installed and independently rehashed.
+
+- The client entered the world on the level 40 character Rom in Dustwallow
+  Marsh without a visible Lua error, crash, frozen UI, or startup loop.
+- Opening the world map without `/koquest map` displayed four quest-giver icons.
+- Moving to the Kalimdor continent cleared zone-only pins; selecting Dustwallow
+  again repopulated all four icons automatically.
+- Final `/koquest` diagnostics reported:
+
+  ```text
+  worldRefresh events=6 immediate=4/2 deferred=0 retries=0 pending=false
+  last=rendered map=15 key=1:11:Dustwallow:15 size=1002x668
+  ```
+
+- The installed candidate was independently rehashed against the bundled
+  302-file manifest after installation.
+
+## Scope boundary
+
+The live pass exercised an English client and the world-map transition that
+originally failed; a second native launch after the isolated locale-recovery
+addition is not claimed. Automated tests cover non-English on-demand loading,
+disabled-pack recovery, and fallback. Native-client smoke tests for every
+supported locale remain a release follow-up rather than an inferred claim.
+
+---
+
+# Previous release validation: 2.0.0-beta1.20
 
 Validation date: 2026-08-25
 

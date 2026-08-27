@@ -1,6 +1,6 @@
 # Architecture
 
-The runtime retains pfQuest's database, quest parser, tracker, browser, and node model. `compat/emberveil.lua` loads immediately after the upstream client compatibility layer and establishes safe wrappers before the remaining modules load. `emberveil_map.lua` loads after `map.lua` and replaces world-map/minimap update methods with Emberveil-specific rendering.
+The runtime retains pfQuest's database, quest parser, tracker, browser, and node model. `compat/emberveil.lua` loads immediately after the upstream client compatibility layer and establishes safe wrappers before the remaining modules load. `locale_loader.lua` then loads at most the current client's load-on-demand database pack while English remains resident as a guaranteed fallback. `emberveil_map.lua` loads after `map.lua` and replaces world-map/minimap update methods with Emberveil-specific rendering.
 
 Core rules:
 
@@ -20,5 +20,5 @@ Core rules:
 - **Indoor continuity:** A blank interior zone API may reuse the last verified parent zone; a new-area event clears that identity.
 - **Hidden-map recovery:** The raw `SetMapToCurrentZone` bridge is retained privately and called only after login, only while the world map is hidden, outside party/raid interiors, under a busy guard and cooldown.
 - **Render safety:** Missing/ambiguous coordinates, scale data, instance context, or draw-layer dimensions hide pins.
-- **Performance:** Minimap nodes use a five-unit spatial grid. Heavy reprojection is throttled adaptively and transition events coalesce before rendering.
+- **Performance:** Only English and the active database locale are parsed at startup. Exact quest-title lookup uses a lazy index instead of rescanning the quest table each poll. Minimap nodes use a spatial grid and a monotonic mutation revision; heavy reprojection is throttled adaptively and world-map transition bursts coalesce into a forced final-selection render.
 - **Privacy:** Legacy pfQuest version broadcasts are not loaded; there is no addon telemetry or chat transmission.

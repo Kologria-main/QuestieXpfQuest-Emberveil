@@ -12,9 +12,20 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Version = '2.0.0-beta1.20'
+$Version = '2.0.0-beta1.21'
 $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$SourceRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseRoot 'addon\pfQuest'))
+$PayloadRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseRoot 'addon'))
+$ManagedAddonNames = @(
+    'pfQuest',
+    'pfQuest_Locale_deDE',
+    'pfQuest_Locale_esES',
+    'pfQuest_Locale_frFR',
+    'pfQuest_Locale_koKR',
+    'pfQuest_Locale_ptBR',
+    'pfQuest_Locale_ruRU',
+    'pfQuest_Locale_zhCN',
+    'pfQuest_Locale_zhTW'
+)
 $ManifestPath = Join-Path $PSScriptRoot 'payload-manifest.sha256'
 
 if ([string]::IsNullOrWhiteSpace($StateRoot)) {
@@ -369,12 +380,16 @@ function Read-PayloadManifest {
     $entries = @()
     foreach ($line in Get-Content -LiteralPath $ManifestPath) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
-        if ($line -notmatch '^([A-Fa-f0-9]{64})\s+\*(addon/pfQuest/.+)$') {
+        if ($line -notmatch '^([A-Fa-f0-9]{64})\s+\*(addon/.+)$') {
             throw "Invalid payload manifest line: $line"
         }
-        $relative = $Matches[2].Substring('addon/pfQuest/'.Length).Replace('/', '\')
+        $relative = $Matches[2].Substring('addon/'.Length).Replace('/', '\')
         if ([System.IO.Path]::IsPathRooted($relative) -or $relative.Split('\') -contains '..') {
             throw "Unsafe payload manifest path: $relative"
+        }
+        $addonName = $relative.Split('\')[0]
+        if ($ManagedAddonNames -notcontains $addonName) {
+            throw "Manifest contains an unmanaged addon folder: $addonName"
         }
         $entries += [pscustomobject]@{ Hash = $Matches[1].ToUpperInvariant(); Relative = $relative }
     }
@@ -387,12 +402,20 @@ function Assert-Payload {
     $fullRoot = Get-NormalizedPath $Root
     if (-not (Test-Path -LiteralPath $fullRoot -PathType Container)) { throw "$Label is missing: $fullRoot" }
 
-    $forbidden = Get-ChildItem -LiteralPath $fullRoot -Recurse -File | Where-Object {
+    $actualFiles = @()
+    foreach ($addonName in $ManagedAddonNames) {
+        $addonRoot = Join-Path $fullRoot $addonName
+        if (-not (Test-Path -LiteralPath $addonRoot -PathType Container)) {
+            throw "$Label is missing managed addon folder: $addonName"
+        }
+        $actualFiles += @(Get-ChildItem -LiteralPath $addonRoot -Recurse -File)
+    }
+
+    $forbidden = $actualFiles | Where-Object {
         $_.Extension -in @('.exe', '.dll', '.com', '.scr', '.bat', '.cmd', '.ps1')
     }
     if ($forbidden) { throw "$Label contains executable content: $($forbidden[0].FullName)" }
 
-    $actualFiles = @(Get-ChildItem -LiteralPath $fullRoot -Recurse -File)
     if ($actualFiles.Count -ne $Manifest.Count) {
         throw "$Label file count mismatch: expected $($Manifest.Count), found $($actualFiles.Count)."
     }
@@ -404,13 +427,19 @@ function Assert-Payload {
         if ($actual -ne $entry.Hash) { throw "$Label hash mismatch: $($entry.Relative)." }
     }
 
-    $tocPath = Join-Path $fullRoot 'pfQuest.toc'
+    $tocPath = Join-Path $fullRoot 'pfQuest\pfQuest.toc'
     $toc = Get-Content -LiteralPath $tocPath -Raw
     if ($toc -notmatch [regex]::Escape("## Version: EV-$Version")) {
         throw "$Label has the wrong addon version. Expected EV-$Version."
     }
 
-    [xml](Get-Content -LiteralPath (Join-Path $fullRoot 'init\addon.xml') -Raw) | Out-Null
+    [xml](Get-Content -LiteralPath (Join-Path $fullRoot 'pfQuest\init\addon.xml') -Raw) | Out-Null
+    foreach ($localeAddon in $ManagedAddonNames | Where-Object { $_ -ne 'pfQuest' }) {
+        $localeToc = Get-Content -LiteralPath (Join-Path $fullRoot "$localeAddon\$localeAddon.toc") -Raw
+        if ($localeToc -notmatch '(?m)^## LoadOnDemand:\s*1\s*$') {
+            throw "$Label locale pack is not load-on-demand: $localeAddon"
+        }
+    }
     Write-InstallLog "$Label verified: $($Manifest.Count) files, SHA-256 manifest and version are valid." Green
 }
 
@@ -431,7 +460,7 @@ try {
     Write-InstallLog "No network access, telemetry, or remote downloads are used by this installer."
 
     $manifest = @(Read-PayloadManifest)
-    Assert-Payload $SourceRoot $manifest 'Bundled source payload'
+    Assert-Payload $PayloadRoot $manifest 'Bundled source payload'
 
     if ($ValidateOnly) {
         Write-InstallLog "Validation-only mode completed successfully." Green
@@ -459,14 +488,23 @@ try {
     }
     if (-not (Test-AddOnsPath $addOns)) { throw "Unsafe or invalid AddOns target: $addOns" }
 
-    $target = Get-NormalizedPath (Join-Path $addOns 'pfQuest')
-    if ((Get-NormalizedPath ([System.IO.Path]::GetDirectoryName($target))) -ine (Get-NormalizedPath $addOns) -or
-        [System.IO.Path]::GetFileName($target) -ine 'pfQuest') {
-        throw "Refusing unexpected target path: $target"
+    $targets = @{}
+    foreach ($addonName in $ManagedAddonNames) {
+        $target = Get-NormalizedPath (Join-Path $addOns $addonName)
+        if ((Get-NormalizedPath ([System.IO.Path]::GetDirectoryName($target))) -ine (Get-NormalizedPath $addOns) -or
+            [System.IO.Path]::GetFileName($target) -ine $addonName) {
+            throw "Refusing unexpected target path: $target"
+        }
+        if ((Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath $target -PathType Container)) {
+            throw "Target exists but is not a directory: $target"
+        }
+        $targets[$addonName] = $target
     }
-    if ($target -ieq $SourceRoot) { throw 'Source and installation target resolve to the same path.' }
+    if ((Get-NormalizedPath $addOns) -ieq (Get-NormalizedPath $PayloadRoot)) {
+        throw 'Source and installation target resolve to the same path.'
+    }
 
-    Write-InstallLog "Target: $target" Cyan
+    Write-InstallLog "Target AddOns directory: $addOns" Cyan
     if ($SkipSavedVariablesRepair) {
         Write-InstallLog 'SavedVariables recovery skipped by explicit request.' Yellow
     } else {
@@ -478,42 +516,83 @@ try {
     }
     $token = [guid]::NewGuid().ToString('N')
     $stageRoot = Join-Path $addOns ".qev-stage-$token"
-    $stageTarget = Join-Path $stageRoot 'pfQuest'
-    $rollback = Join-Path $addOns ".qev-rollback-$token"
+    $rollbackRoot = Join-Path $addOns ".qev-rollback-$token"
     $installed = $false
+    $installedNames = New-Object 'System.Collections.Generic.List[string]'
+    $movedOldNames = New-Object 'System.Collections.Generic.List[string]'
 
     try {
         New-Item -ItemType Directory -Path $stageRoot | Out-Null
-        Copy-Item -LiteralPath $SourceRoot -Destination $stageRoot -Recurse -Force
-        Assert-Payload $stageTarget $manifest 'Staged payload'
+        foreach ($addonName in $ManagedAddonNames) {
+            Copy-Item -LiteralPath (Join-Path $PayloadRoot $addonName) -Destination $stageRoot -Recurse -Force
+        }
+        Assert-Payload $stageRoot $manifest 'Staged payload'
 
-        if (Test-Path -LiteralPath $target -PathType Container) {
+        $existingNames = @($ManagedAddonNames | Where-Object { Test-Path -LiteralPath $targets[$_] -PathType Container })
+        if ($existingNames.Count -gt 0) {
             $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
             $backupParent = Join-Path $BackupRoot "$stamp-$token"
             New-Item -ItemType Directory -Path $backupParent -Force | Out-Null
-            Copy-Item -LiteralPath $target -Destination $backupParent -Recurse -Force
-            Write-InstallLog "Existing pfQuest backed up to: $backupParent" Yellow
-            Move-Item -LiteralPath $target -Destination $rollback
+            New-Item -ItemType Directory -Path $rollbackRoot -Force | Out-Null
+            foreach ($addonName in $existingNames) {
+                Copy-Item -LiteralPath $targets[$addonName] -Destination $backupParent -Recurse -Force
+                Move-Item -LiteralPath $targets[$addonName] -Destination $rollbackRoot
+                $movedOldNames.Add($addonName)
+            }
+            Write-InstallLog "Existing KoQuest folders backed up to: $backupParent" Yellow
         }
 
-        try {
-            Move-Item -LiteralPath $stageTarget -Destination $target
-            Assert-Payload $target $manifest 'Installed payload'
-            $installed = $true
-        } catch {
-            if (Test-Path -LiteralPath $target) {
-                Remove-PrivateDirectory $target $addOns 'pfQuest'
+        foreach ($addonName in $ManagedAddonNames) {
+            Move-Item -LiteralPath (Join-Path $stageRoot $addonName) -Destination $targets[$addonName]
+            $installedNames.Add($addonName)
+        }
+        Assert-Payload $addOns $manifest 'Installed payload'
+        $installed = $true
+
+        if (Test-Path -LiteralPath $rollbackRoot) {
+            Remove-PrivateDirectory $rollbackRoot $addOns '.qev-rollback-'
+        }
+    } catch {
+        $installError = $_
+        $restoreFailed = $false
+        foreach ($addonName in $installedNames) {
+            if (Test-Path -LiteralPath $targets[$addonName]) {
+                try {
+                    Remove-PrivateDirectory $targets[$addonName] $addOns 'pfQuest'
+                } catch {
+                    $restoreFailed = $true
+                    Write-InstallLog "WARNING: Could not remove failed replacement $addonName at $($targets[$addonName])" Red
+                }
             }
-            if (Test-Path -LiteralPath $rollback) {
-                Move-Item -LiteralPath $rollback -Destination $target
-                Write-InstallLog 'Installation failed; the previous pfQuest folder was restored.' Yellow
-            }
-            throw
         }
 
-        if (Test-Path -LiteralPath $rollback) {
-            Remove-PrivateDirectory $rollback $addOns '.qev-rollback-'
+        foreach ($addonName in $movedOldNames) {
+            $rollbackAddon = Join-Path $rollbackRoot $addonName
+            try {
+                if (Test-Path -LiteralPath $rollbackAddon -PathType Container) {
+                    if (Test-Path -LiteralPath $targets[$addonName]) {
+                        $restoreFailed = $true
+                        Write-InstallLog "WARNING: Cannot restore $addonName while the failed replacement still exists at $($targets[$addonName])" Red
+                    } else {
+                        Move-Item -LiteralPath $rollbackAddon -Destination $targets[$addonName]
+                    }
+                }
+            } catch {
+                $restoreFailed = $true
+                Write-InstallLog "WARNING: Could not automatically restore $addonName from $rollbackAddon" Red
+            }
         }
+
+        if (-not $restoreFailed -and (Test-Path -LiteralPath $rollbackRoot)) {
+            Remove-PrivateDirectory $rollbackRoot $addOns '.qev-rollback-'
+        }
+        if ($movedOldNames.Count -gt 0 -and -not $restoreFailed) {
+            Write-InstallLog 'Installation failed; the previous KoQuest folders were restored.' Yellow
+        }
+        if ($restoreFailed) {
+            throw "Installation failed and automatic cleanup/rollback was incomplete. Inspect AddOns and preserved rollback (if present): $rollbackRoot. Original error: $($installError.Exception.Message)"
+        }
+        throw $installError
     } finally {
         if (Test-Path -LiteralPath $stageRoot) {
             Remove-PrivateDirectory $stageRoot $addOns '.qev-stage-'
@@ -522,11 +601,11 @@ try {
 
     if (-not $installed) { throw 'Installation did not reach the verified state.' }
     Write-InstallLog "DONE: KoQuest $Version installed and verified." Green
-    Write-InstallLog 'Restart Emberveil completely, then enable pfQuest in the AddOns list.' Green
+    Write-InstallLog 'Restart Emberveil completely, then enable pfQuest in the AddOns list. Locale packs load on demand.' Green
     Write-InstallLog "Log: $LogPath"
     exit 0
 } catch {
     Write-InstallLog ("ERROR: " + $_.Exception.Message) Red
-    Write-InstallLog "Nothing unverified was left installed. Log: $LogPath" Yellow
+    Write-InstallLog "Installation stopped. Review any rollback details above. Log: $LogPath" Yellow
     exit 1
 }

@@ -7,7 +7,7 @@ body:
     id: version
     attributes:
       label: KoQuest version
-      placeholder: 2.0.0-beta1.19
+      placeholder: 2.0.0-beta1.21
     validations:
       required: true
   - type: input

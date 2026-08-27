@@ -1,12 +1,16 @@
 {
   "name": "koquest-emberveil-release-tools",
   "private": true,
-  "version": "2.0.0-beta1.20",
+  "version": "2.0.0-beta1.21",
   "description": "Offline validation tools for the KoQuest Emberveil addon release.",
   "packageManager": "pnpm@11.19.0",
   "scripts": {
-    "validate": "node scripts/validate-source.mjs && fengari tests/quest-state.lua",
-    "test:quest-state": "fengari tests/quest-state.lua"
+    "build:discord": "pwsh -NoProfile -File scripts/build-discord-release.ps1",
+    "validate": "node scripts/validate-source.mjs && node scripts/run-lua-tests.mjs tests/quest-state.lua tests/locale-loading.lua tests/quest-title-index.lua tests/map-runtime.lua",
+    "test:quest-state": "node scripts/run-lua-tests.mjs tests/quest-state.lua",
+    "test:locale-loading": "node scripts/run-lua-tests.mjs tests/locale-loading.lua",
+    "test:quest-title-index": "node scripts/run-lua-tests.mjs tests/quest-title-index.lua",
+    "test:map-runtime": "node scripts/run-lua-tests.mjs tests/map-runtime.lua"
   },
   "devDependencies": {
     "fengari-node-cli": "0.1.0",

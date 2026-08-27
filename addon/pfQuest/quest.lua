@@ -465,7 +465,29 @@ function pfQuest:AddQuestLogIntegration()
 
   pfQuest.buttonLanguage:SetScript("OnClick", function()
     UIDropDownMenu_Initialize(self, function()
-      local func = function() pfQuest_config.translate = this.value end
+      local func = function()
+        local locale = this.value
+        if not locale then
+          pfQuest_config.translate = nil
+          return
+        end
+
+        local loaded = pfDB["quests"][locale] and true or false
+        local detail
+        if not loaded and QuestieEV and QuestieEV.LoadLocaleDatabase then
+          loaded, detail = QuestieEV:LoadLocaleDatabase(locale, "translation")
+        end
+
+        if loaded and pfDB["quests"][locale] then
+          pfQuest_config.translate = locale
+        else
+          pfQuest_config.translate = nil
+          if QuestieEV and QuestieEV.Chat then
+            QuestieEV.Chat("translation database " .. tostring(locale)
+              .. " unavailable (" .. tostring(detail or "LOAD_FAILED") .. ").")
+          end
+        end
+      end
       local info = {}
       info.text = "|cffaaaaaa" .. pfQuest_Loc["Reset Language"]
       info.value = nil
