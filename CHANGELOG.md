@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.0-beta1.21 — 2026-08-28
+
+- Replace the Emberveil-facing download with a minimal launcher-compatible ZIP whose root is exactly `KoQuest/KoQuest.toc`; move installers and documentation into a separately named full offline package.
+- Isolate the complete KoQuest runtime namespace—folder, TOC, globals, SavedVariables, frames, map-node buckets, popups, and database slash commands—so genuine pfQuest installations can coexist.
+- Add transactional Windows and Linux migration for a metadata-verified legacy KoQuest `pfQuest` folder while explicitly preserving genuine upstream pfQuest folders.
+- Fix newly accepted objective locations being hidden until the first kill/loot when Emberveil temporarily advertises unreadable objective rows.
+- Retain original hoverable objective circles on both map surfaces and lower the dense world-map button ceiling from 320 to 240.
+- Add adaptive 20/13.3/10 Hz minimap projection based on smoothed FPS, while keeping immediate 20 Hz projection during map and zoom transitions.
+- Avoid redundant high-frequency pin highlight/show/hide calls when their visibility state has not changed.
+- Extend automated gates for namespace isolation, legacy settings migration, genuine pfQuest coexistence, launcher ZIP structure/limits, deterministic dual-package builds, and Linux migration.
+
 ## 2.0.0-beta1.20 — 2026-08-25
 
 - Restore the small colored pfQuest objective circles to dense world maps. Every visible circle is a real hoverable/clickable pfQuest button with the original spawn, quest, progress, and drop-rate tooltip.

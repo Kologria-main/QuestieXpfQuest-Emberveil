@@ -1,0 +1,22 @@
+## Interface: 11200
+## Title: |cff33ffccKoQuest|r |cffffffff(Emberveil, pfQuest Engine)|r
+## Author: Shagu (pfQuest) + Emberveil compatibility port
+## Notes: Safe quest helper and localized database for Emberveil.
+## Notes-ruRU: Безопасный помощник заданий и локализованная база данных для Emberveil
+## Version: EV-2.0.0-beta1.21
+## OptionalDeps: pfUI
+## SavedVariables: KoQuest_questcache
+## SavedVariablesPerCharacter: KoQuest_config, KoBrowser_fav, KoQuest_history, KoQuest_colors, KoQuest_server, KoQuest_track, KoQuest_confirmedAvailable
+
+init\data.xml
+init\enUS.xml
+init\koKR.xml
+init\frFR.xml
+init\deDE.xml
+init\zhCN.xml
+init\zhTW.xml
+init\esES.xml
+init\ruRU.xml
+init\ptBR.xml
+
+init\addon.xml

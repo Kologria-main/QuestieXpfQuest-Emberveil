@@ -1,98 +1,33 @@
-# KoQuest 2.0.0-beta1.20 — Interactive World-Map Objectives
+# KoQuest 2.0.0-beta1.21 — Launcher, Namespace, and Quest-Node Repair
 
-This patch restores the small colored objective circles players expected on the
-Westfall world map without bringing back the earlier non-interactive dot layer
-or the unbounded 1,000-button dense-zone cost.
+This update addresses every actionable report from the recent KoQuest addon-page comments: failed/hanging launcher downloads, the pfQuest installation collision, accepted objectives appearing only after the first kill, and low FPS in dense questing zones.
 
-## What changed
+## Download and installation
 
-- Dense world maps again show small colored pfQuest objective circles alongside
-  the original route, summary, quest-giver, turn-in, and player-marker icons.
-- The circles are real pfQuest buttons. Hovering shows the original unit/object,
-  level, type, respawn, quest, objective progress, and drop-rate tooltip; clicking
-  retains pfQuest's normal color control.
-- Repeated coordinates are compacted only when a zone is dense. Grouping is
-  limited to the same quest/spawn/item identity, and every displayed circle is
-  placed on a real database coordinate rather than a synthetic average.
-- The compacted set is cached by selected map and quest-node generation. Normal
-  map redraws reuse it instead of rescanning and regrouping the database.
-- `/koquest` now reports rendered/raw objective counts and the selected grid so
-  dense-map behavior can be diagnosed from player reports.
+- The primary release asset is now a launcher-native ZIP with `KoQuest/KoQuest.toc` directly at its root. It contains only the runtime addon—no wrapper directory, installer bundle, documentation tree, or unrelated files.
+- The readable Windows/Linux installers and documentation remain available in a separately named full offline package.
+- Release validation enforces Emberveil's 64 MiB ZIP, 512 MiB unpacked, 256 MiB-per-file, safe-path, root-folder, manifest-name, and no-client-data requirements and fully reads both archives.
 
-## Live result
+## pfQuest coexistence and safe migration
 
-On the exact Emberveil live client, Westfall rendered 277 interactive objective
-circles from 997 raw objective points, plus 12 original summary/giver icons (289
-world-map nodes total). The final installed candidate displayed the expected
-`Slark` / `Westfall Stew` / `Murloc Eye` tooltip from one of those circles. Zone → continent → zone transitions
-kept the world circles intact and restored nearby minimap pins after closing the
-map. Steady-state observed FPS returned to approximately 104–113, with the
-diagnostic rolling average around 101 FPS.
+- The runtime folder and TOC are now `KoQuest/KoQuest.toc`.
+- KoQuest's globals, SavedVariables, frames, map-node buckets, popup keys, and database slash commands are isolated from pfQuest. The database commands are now `/kodb` and `/koquestdb`; `/koquest` and `/qev` remain diagnostics commands.
+- The full offline installers recognize a legacy `pfQuest` directory only when its metadata clearly says KoQuest with an `EV-` version. They back it up, migrate settings/history to the new namespace, and remove the duplicate. A genuine upstream pfQuest installation is never modified.
+- Launcher/manual users receive exact cleanup instructions for beta1.20-or-older KoQuest folders. A runtime guard disables only a clearly identified duplicate legacy KoQuest folder and asks the player to remove it and restart.
 
-All beta1.19 correctness, available-quest, completed-history, localization,
-Linux/Wine/Proton, installer, and minimap protections remain unchanged.
+## Quest markers and correctness
 
----
+- Accepted quest objectives no longer disappear when Emberveil advertises objective rows one frame before the rows are readable. KoQuest now renders database locations immediately and refines done/in-progress state on the next quest-log update.
+- Active objective locations remain visible on both world map and minimap. Completed objective locations and completed quests continue to be removed by the official quest state and recorded history paths.
+- Available quest-giver markers remain enabled by default on both map surfaces and continue to honor level, race, class, prerequisites, active quests, and every completion KoQuest can verify.
+- The original hoverable/clickable colored objective circles and quest icons are retained. Dense maps compact only matching quest/spawn/item identities and use real database coordinates.
 
-# Previous: 2.0.0-beta1.19 — Correctness, Localization, and Linux
+## Performance
 
-This update is driven by KoQuest page feedback and the measured UnrealRuntimeCompat database supplied by Thomas. It prioritizes truthful quest state over marker quantity.
+- The minimap stays at the measured 20 Hz cadence during map/zoom transitions and on healthy systems, but steps down to 13.3 or 10 Hz when smoothed FPS is already below 50 or 30. It never returns to the visibly laggy old 4–7 Hz behavior.
+- Repeated highlight hide and pin show/hide calls are skipped when the visual state is already correct.
+- Dense world-map objectives remain tooltip-capable real buttons, with the upper button budget reduced from 320 to 240 to lower UI/frame pressure.
 
-## Correctness changes
+## Verification
 
-- Available quest-giver markers are enabled by default on both map surfaces and are filtered through level, race, class, prerequisites, the active quest log, and KoQuest's recorded completion history.
-- The clearly labeled **Allow Best-Effort Quest Givers (May Include Completed Quests)** control remains available for players who prefer to disable all unverified starters. Emberveil exposes no verified character-wide completion getter, so no addon can passively identify every quest completed before its installation.
-- Accepted-quest objective nodes keep the original hoverable pfQuest icons on the world map. Dense zones use the existing bounded summary nodes; the experimental non-hoverable dot overlay is not shipped.
-- Russian-style runtime level prefixes such as `[24]` and `[15G5]` are removed before database title matching. A CT_QuestLevels original getter loaded after KoQuest is discovered dynamically.
-- Collapsed quest-log headers no longer make hidden quests look abandoned or completed, and no longer erase them from the tracker.
-- Measured numeric race/class IDs are used for locale-independent quest filtering.
-
-## Platform, language, and packaging
-
-- Added a transactional, offline Linux/Wine/Proton installer with the same payload-hash, backup, staging, verification, and rollback policy as Windows.
-- Added requested-locale validation for ruRU, zhCN, and zhTW; every base enUS item, unit, quest, zone, profession, and object ID must be present.
-- KoQuest is now the public name. The `pfQuest` folder and SavedVariables names stay unchanged so upgrades preserve settings and history.
-- Windows SavedVariables recovery is now bounded and release tests use an explicit isolated root. Broad profile scanning is disabled unless a support operator deliberately opts in.
-
-## Retained performance protections
-
-All beta1.18 route, tracker, spatial cache, fixed 20 Hz minimap projection, world-map throttle, render-nudge, and bounded-pool hardening remains in place. Removing the experimental world-map dot overlay also removes hundreds of extra textures from dense maps.
-
-## Validation scope
-
-Offline gates cover Lua 5.1 syntax, safety contracts, localized database coverage, quest-state simulation, collapsed-log preservation, installer isolation, payload hashes, tamper rejection, Linux installation, ZIP traversal/CRC, and deterministic builds. Target-client smoke results are recorded separately in `docs/release-validation.md`; a beta is not called stable based on offline tests alone.
-
----
-
-# Previous: 2.0.0-beta1.18 — Performance Hardening
-
-This build keeps the beta1.17 quest/map behavior that was verified in game and focuses only on reducing unnecessary work during normal play. No quest-database or marker-visibility policy was intentionally changed.
-
-## Performance audit findings
-
-The beta1.17 minimap path was already protected by a current-map spatial grid, FPS-adaptive cadence, forced-update coalescing, and world-map throttling. The audit did **not** find an unbounded per-frame node/table accumulator in the Emberveil map path. The main remaining waste was high-refresh UI work inherited from pfQuest.
-
-## Changes
-
-- Route processing now applies its 50 ms cap **before** calling the Emberveil player-map-position bridge. On 144/240 Hz displays this prevents the old 144/240 bridge calls per second when the route output itself can update only 20 times per second.
-- When there are no route nodes, the route callback now returns after its cheap cadence guard, before player-position bridge calls, sorting, distance math, or texture work.
-- Invisible world-map route lines are no longer continuously sorted/repainted while the world map is closed. Work continues only when the world-map route is visible, the minimap route is enabled, or the navigation arrow is enabled.
-- Navigation-arrow trigonometry/texture work is capped to roughly 60 Hz. This does not reduce responsiveness on 60 FPS-or-lower clients and prevents high-refresh displays from multiplying visual-only Lua work.
-- Tracker row visual updates are centralized in the tracker frame at roughly 30 Hz instead of installing one full-rate `OnUpdate` callback per visible tracker row.
-- Zone-name-to-map-ID lookup is now cached, avoiding repeated full zone-table scans during the 250 ms location-context refresh loop.
-- The beta1.17 near-immediate quest-render nudge now uses one shared `QuestieEV.questRenderNudgeAt` deadline from event through node transaction to renderer. This fixes the intended coalescing path instead of maintaining separate event/frame timer fields.
-
-## Existing protections retained
-
-- Current-map-only minimap node cache.
-- 5x5-zone-unit spatial grid candidate filtering.
-- FPS-adaptive minimap cadence.
-- Slower minimap cadence during indoor/zoom transitions.
-- World-map update throttle.
-- Quest event coalescing and post-node-transaction cache invalidation.
-- Full available-quest database scans remain excluded from ordinary quest acceptance/progress updates.
-- Frame/node pools are reused rather than recreated every movement update.
-
-## Scope / limitation
-
-Offline analysis can verify the control flow, cache lifetime, bounded pools, package integrity, and absence of accidental high-frequency scans. Only the Emberveil client can measure actual frame time on the target PC. beta1.18 therefore keeps the changes deliberately narrow and preserves beta1.17 behavior that was already reported working in game.
+The release gates cover Lua 5.1 parsing, runtime namespace isolation, localized database coverage, quest-state simulation, packaging constraints, deterministic archive generation, SHA-256 payload integrity, Windows legacy migration, genuine pfQuest coexistence, Linux migration, transactional rollback, and tamper rejection. Target-client results are recorded in `docs/release-validation.md`.

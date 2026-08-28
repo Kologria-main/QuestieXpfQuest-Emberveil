@@ -1,0 +1,1 @@
+KoDB["professions"]["ptBR-tbc"] = {}

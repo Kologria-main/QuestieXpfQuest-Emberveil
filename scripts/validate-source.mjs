@@ -4,8 +4,8 @@ import process from "node:process";
 import luaparse from "luaparse";
 
 const repo = path.resolve(import.meta.dirname, "..");
-const addon = path.join(repo, "addon", "pfQuest");
-const expectedVersion = "2.0.0-beta1.20";
+const addon = path.join(repo, "addon", "KoQuest");
+const expectedVersion = "2.0.0-beta1.21";
 const failures = [];
 let parsedLua = 0;
 let totalFiles = 0;
@@ -76,10 +76,10 @@ for (const file of files) {
   }
 }
 
-const toc = path.join(addon, "pfQuest.toc");
+const toc = path.join(addon, "KoQuest.toc");
 const tocText = fs.readFileSync(toc, "utf8");
 if (!tocText.includes(`## Version: EV-${expectedVersion}`)) {
-  fail(`pfQuest.toc version is not EV-${expectedVersion}`);
+  fail(`KoQuest.toc version is not EV-${expectedVersion}`);
 }
 const packageMetadata = JSON.parse(fs.readFileSync(path.join(repo, "package.json"), "utf8"));
 if (packageMetadata.version !== expectedVersion) fail("package.json version mismatch");
@@ -95,7 +95,7 @@ for (const rawLine of tocText.split(/\r?\n/)) {
   const line = rawLine.trim();
   if (!line || line.startsWith("#")) continue;
   const candidate = path.join(addon, line.replaceAll("\\", path.sep));
-  if (!existsCaseInsensitive(candidate)) fail(`pfQuest.toc references missing path: ${line}`);
+  if (!existsCaseInsensitive(candidate)) fail(`KoQuest.toc references missing path: ${line}`);
 }
 
 for (const xml of files.filter((file) => path.extname(file).toLowerCase() === ".xml")) {
@@ -164,6 +164,32 @@ for (const { file, source } of sourceFiles) {
   }
 }
 
+// KoQuest must coexist with upstream pfQuest. Legacy runtime globals, node
+// buckets, frame names, and slash registrations would silently overwrite one
+// another even if the addon directory itself were renamed.
+const isolatedCode = sourceFiles
+  .filter(({ file }) => !file.endsWith(path.join("compat", "pfUI.lua")))
+  .map(({ source }) => source
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("--"))
+    .join("\n")
+    .replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, ""))
+  .join("\n");
+for (const [pattern, label] of [
+  [/\bpfQuest(?:Compat|Config|_config|_questcache|_history|_colors|_server|_track|_confirmedAvailable)?\b/, "pfQuest global"],
+  [/\bpfDatabase\b/, "pfDatabase global"],
+  [/\bpfBrowser\b/, "pfBrowser global"],
+  [/\bpfJournal\b/, "pfJournal global"],
+  [/\bpfMap\b/, "pfMap global"],
+  [/\bpfDB\b/, "pfDB global"],
+  [/\bQuestieEV\b/, "QuestieEV global"],
+  [/\bPFQUEST\b/, "PFQUEST node bucket"],
+  [/\bPFDB\b/, "PFDB node bucket"],
+  [/SLASH_PFDB|SlashCmdList\["PFDB"\]/, "pfQuest slash-command registration"],
+]) {
+  if (pattern.test(isolatedCode)) fail(`runtime namespace still contains legacy ${label}`);
+}
+
 const compat = fs.readFileSync(path.join(addon, "compat", "emberveil.lua"), "utf8");
 const mapEngine = fs.readFileSync(path.join(addon, "emberveil_map.lua"), "utf8");
 const quest = fs.readFileSync(path.join(addon, "quest.lua"), "utf8");
@@ -180,10 +206,13 @@ const contracts = [
   [compat.includes(`function EV:ConfirmAvailableQuestTitle`), "client-confirmed available-quest path missing"],
   [compat.includes(`function EV:IsClientConfirmedAvailableQuest`), "client-confirmed quest filter missing"],
   [compat.includes(`return "strict-hidden"`), "strict completed-history availability mode missing"],
-  [compat.includes(`pfQuest_config["unverifiedquestgivers"] == "1"`), "best-effort quest-giver control missing"],
+  [compat.includes(`KoQuest_config["unverifiedquestgivers"] == "1"`), "best-effort quest-giver control missing"],
   [compat.includes(`function EV:PreserveHiddenQuestLog`), "collapsed quest-log preservation missing"],
-  [database.includes(`not QuestieEV:CanRenderAvailableQuests()`), "available quests are not completion-gated"],
+  [compat.includes(`function EV:DisableLegacyKoQuestFolder`), "legacy KoQuest folder guard missing"],
+  [compat.includes(`pcall(DisableAddOn, "pfQuest")`), "legacy KoQuest folder is not disabled safely"],
+  [database.includes(`not KoQuestEV:CanRenderAvailableQuests()`), "available quests are not completion-gated"],
   [database.includes(`objectiveType == "gobject"`), "Emberveil game-object objective handling missing"],
+  [database.includes(`objectiveType = "unknown"`), "transient accepted-quest objective fallback missing"],
   [database.includes(`renderEnder = false`), "premature active-quest ender markers are not gated"],
   [database.includes(`table.getn(bestIDs) ~= 1`), "ambiguous quest-ID resolver is not fail-closed"],
   [!database.includes(`ttitle = data.T`), "active quest resolver still fuzzy-maps unknown titles"],
@@ -202,14 +231,16 @@ const contracts = [
   [mapEngine.includes(`function EV:CaptureMinimapPlayerPosition()`), "20 Hz minimap position fast path missing"],
   [mapEngine.includes(`pin.qevVisualKey ~= visualKey`), "minimap visual metadata cache missing"],
   [mapEngine.includes(`local denseMode = totalNodes > 450`), "dense-zone world-map compaction missing"],
-  [mapEngine.includes(`WORLD_OBJECTIVE_PIN_BUDGET = 320`), "world-map objective pin budget missing"],
+  [mapEngine.includes(`WORLD_OBJECTIVE_PIN_BUDGET = 240`), "world-map objective pin budget missing"],
+  [mapEngine.includes(`perf.miniLowFpsInterval or 0.10`), "adaptive low-FPS minimap interval missing"],
+  [mapEngine.includes(`if not pin:IsShown() then pin:Show() end`), "minimap visibility-state cache missing"],
   [mapEngine.includes(`function EV:GetWorldRenderEntries`), "hoverable world-map objective cache missing"],
   [mapEngine.includes(`bucket.node[title] = meta`), "world-map objective tooltips are not preserved"],
   [mapEngine.includes(`sourceKey = entry.key`), "world-map compaction does not preserve a real source coordinate"],
   [!mapEngine.includes(`bucket.xTotal / bucket.count`), "world-map objectives still use synthetic averaged coordinates"],
-  [mapEngine.includes(`pfMap:BuildNode("pfMapPin" .. i, WorldMapButton)`), "world-map objectives are not real hoverable pfMap buttons"],
+  [mapEngine.includes(`KoMap:BuildNode("KoMapPin" .. i, WorldMapButton)`), "world-map objectives are not real hoverable KoMap buttons"],
   [mapEngine.includes(`function EV:EnsureActiveQuestNodes`), "active quest-node self-heal missing"],
-  [quest.includes(`QuestieEV:EnsureActiveQuestNodes("queue-drained")`), "quest queue does not audit active nodes"],
+  [quest.includes(`KoQuestEV:EnsureActiveQuestNodes("queue-drained")`), "quest queue does not audit active nodes"],
   [mapEngine.includes(`parentSource = "sticky-parent"`), "indoor parent-zone continuity is missing"],
   [compat.includes(`EV._rawSetMapZoom`), "hidden-map zone-probe bridge missing"],
   [mapEngine.includes(`function EV:BeginHiddenZoneProbe`), "nil-zone cold-start probe missing"],
@@ -221,7 +252,7 @@ const contracts = [
   [mapEngine.includes(`function EV:InvalidateMinimapPinVisuals`), "map-close minimap visual reset missing"],
   [!mapEngine.includes(`RenderWorldDots`), "non-hoverable world-map dot layer is still present"],
   [config.includes(`default = "1", type = "checkbox", config = "unverifiedquestgivers"`), "available quest givers are not enabled by default"],
-  [config.includes(`pfQuest_config["availabilitydefaultv2"]`), "available quest-giver upgrade migration missing"],
+  [config.includes(`KoQuest_config["availabilitydefaultv2"]`), "available quest-giver upgrade migration missing"],
   [!mapEngine.includes(`math.floor((xPlayer - maxDx) / cellSize) - 1`), "minimap query retains an unnecessary border"],
 ];
 for (const [passed, message] of contracts) if (!passed) fail(message);
