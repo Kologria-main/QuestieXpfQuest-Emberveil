@@ -1,17 +1,18 @@
-# Release validation: 2.0.0-beta1.20
+# Release validation: 2.0.0-beta1.21
 
-Validation date: 2026-08-25
+Validation date: 2026-08-28
 
-Target: Emberveil live client 1.12.1, launcher build/revision 2286, Windows x64
+Target: Emberveil live client 1.12.1, launcher build/revision 2312, Windows x64
 
 ## Release result
 
-`2.0.0-beta1.20` passed the repository's source, quest-state, package,
-installer, localization-coverage, and payload-integrity gates. The exact addon
-payload was then installed into the path-qualified Emberveil client and exercised
-without abandoning, failing, or turning in a quest. The beta1.20-specific live
-pass covered dense world-map rendering, objective tooltips, zone/continent map
-transitions, minimap recovery, and steady-state performance.
+`2.0.0-beta1.21` passed the repository's source, quest-state, package,
+installer, namespace-isolation, localization-coverage, and payload-integrity
+gates. The exact addon payload was installed into the path-qualified Emberveil
+client and exercised at Sentinel Hill, Westfall. The live pass covered legacy
+KoQuest migration, startup, active and available markers on both map surfaces,
+the original objective-circle tooltip behavior, minimap recovery, and
+steady-state performance.
 
 The tested executable was:
 
@@ -19,85 +20,84 @@ The tested executable was:
 %LOCALAPPDATA%\Programs\Azeroth Launcher\Azeroth\Binaries\Win64\Games\Emberveil\live\Azeroth\Binaries\Win64\Azeroth-Win64-Shipping.exe
 ```
 
-No similarly named WoW client or unrelated game process was used for this test.
+No similarly named WoW client or unrelated game process was used.
 
 ## Automated evidence
 
 - All 146 runtime Lua files parse as Lua 5.1.
-- All TOC/XML paths, version contracts, source safety contracts, and required
-  release files pass validation.
+- All TOC/XML paths, version contracts, source-safety contracts, isolated runtime
+  identifiers, and required release files pass validation.
 - Quest-state scenarios cover complete, failed, incomplete, zero-objective,
-  malformed/API-error, abandoned-removal, reward-turn-in, stale-snapshot, and
-  collapsed-quest-log paths.
+  transient unreadable objective rows, malformed/API-error, abandoned-removal,
+  reward-turn-in, stale-snapshot, and collapsed-quest-log paths.
 - The 293-file addon payload manifest verifies exactly; undeclared, missing, and
   modified files are rejected.
 - Russian, Simplified Chinese, and Traditional Chinese database coverage has no
   missing IDs relative to the English item, unit, quest, zone, profession, or
   object tables.
-- Windows validation-only, clean install, upgrade/backup, scoped SavedVariables
-  repair, rollback, and tamper-rejection cases pass in isolated trees.
-- Linux installer syntax, hash verification, staging, installation, and installed
-  payload verification pass through Git Bash in an isolated tree.
-- The release ZIP is checked for traversal, duplicate paths, decompression, CRC,
-  required files, and exact addon manifest contents.
-- The final SHA-256 is published beside the ZIP in `SHA256SUMS.txt`; reproducible
-  build equality is checked after this document and the feedback audit are frozen.
+- Windows validation-only, clean install, upgrade/backup, legacy KoQuest folder
+  and SavedVariables migration, genuine pfQuest coexistence, rollback, and
+  tamper-rejection cases pass in isolated trees.
+- Linux installer syntax, hash verification, staging, legacy migration,
+  installation, and installed-payload verification pass through Git Bash in an
+  isolated tree.
+- The launcher archive is checked for the required `KoQuest/KoQuest.toc` root
+  layout, matching directory/TOC names, safe paths, forbidden client data,
+  duplicate entries, decompression, CRC, size limits, and exact manifest
+  contents.
+- Both release archives are built twice and compared byte-for-byte; their final
+  SHA-256 values are published in `SHA256SUMS.txt`.
+
+## Real migration evidence
+
+- The previous beta1.20 installation at `Interface\AddOns\pfQuest` was identified
+  as KoQuest by its title and `EV-` version before any migration occurred.
+- Its addon directory was backed up, replaced by `Interface\AddOns\KoQuest`, and
+  the installed 293-file payload matched the candidate manifest exactly.
+- Character and account-wide `pfQuest.lua` files were preserved and migrated to
+  `KoQuest.lua`; the migrated files contained the isolated KoQuest variables.
+- An obsolete unsafe beta1.15 `pfQuest_track` assignment was removed only after a
+  full-file backup. A genuine pfQuest installation is not selected by this
+  migration and is preserved by the automated coexistence test.
 
 ## Live-client evidence
 
-- The installer targeted only the confirmed Emberveil `Interface\AddOns` tree and
-  the explicitly supplied Emberveil account SavedVariables root.
-- One obsolete unsafe `pfQuest_track` assignment was removed surgically. The
-  complete SavedVariables file and prior addon folder were backed up first; no
-  unrelated settings were deleted.
-- The AddOn List displayed `KoQuest (Emberveil, pfQuest Engine)` enabled.
+- The AddOn List displayed `KoQuest (Emberveil, pfQuest Engine)` enabled, with no
+  duplicate legacy KoQuest folder loaded.
 - The client entered the world on the level 11 rogue Kologria at Sentinel Hill,
-  Westfall, without
-  a visible Lua error, crash, frozen UI, or startup loop.
-- `/koquest` reported a complete quest-log snapshot, local best-effort completion
-  history, available quest givers enabled, 1,009 cached Westfall nodes, and:
-
-  ```text
-  questState ready=true sync=local-history-no-server-api
-  availability=local-best-effort historyAuthoritative=false availableGivers=true
-  logSnapshot=complete completed=30 history=30 liveQuestlog=10
-  worldDense=true worldNodes=289/1009 suppressed=720
-  objectives=277/997 grid=6
-  ```
-
-- Database-matched available quest-giver `!` markers were visible on both the
-  Westfall world map and minimap. Known active and locally recorded completed
-  quests remained filtered; the client exposes no verified API for discovering
-  completions from before KoQuest was installed.
-- Dense Westfall rendering retained 12 original summary/giver icons and restored
-  277 small colored objective circles from 997 raw objective coordinates. Every
-  visible circle is a real pfQuest Button; no experimental raw-dot texture layer
-  is present.
-- Hovering a colored world-map circle in the final installed candidate displayed
-  the expected original tooltip: `Slark`, level `15`, unit, 90-minute respawn,
-  quest `Westfall Stew`, and `Murloc Eye: 0/3 30.84%`.
-- Compaction grouped only matching quest/spawn/item identities. Each displayed
-  circle uses a real source database coordinate, never an averaged or invented
-  position. The selected six-percent grid bounded the dense world-map pool at
-  289 total buttons.
-- The Westfall world map, minimap bridge, tracker startup, diagnostics, and a
-  zone-to-continent-to-zone map transition remained responsive. Full minimap
-  pins returned on the first scheduled projection after the continent map closed.
-- The 20 Hz minimap projection reported a 0.05-second interval, 1,009 cached
-  Westfall nodes, and 80 candidates in the sampled spatial query. The diagnostic
-  rolling average was about 101 FPS; observed steady-state overlay values at
-  Sentinel Hill returned to approximately 104-113 FPS.
+  Westfall, without a visible Lua error, crash, frozen UI, or startup loop.
+- Startup reported compatibility and map-engine version `2.0.0-beta1.21`, a
+  reconciled quest state, and local best-effort completion history.
+- The tracker displayed seven active quests and their objective progress.
+- Database-matched available quest-giver `!` markers and active objective circles
+  were visible on the minimap and Westfall world map.
+- The world map retained the original route, summary, giver, and player icons.
+  Its added small colored circles were the original pfQuest node buttons, not a
+  replacement texture layer.
+- Hovering a world-map circle displayed the expected original tooltip for
+  `Great Goretusk`: level `16-17`, unit, five-minute respawn, quest
+  `Goretusk Liver Pie`, and `Goretusk Liver: 0/8 36.96%`.
+- Closing the world map restored the minimap nodes on the next scheduled
+  projection.
+- `/koquest` reported 1,009 cached Westfall nodes, 80 spatial candidates,
+  224 visible world-map nodes, 27 visible minimap nodes, 212 visible objective
+  buttons from 997 objective coordinates, and a six-percent compaction grid.
+- The minimap projection ran at its healthy 0.05-second interval. After startup,
+  observed steady-state FPS readings were 69, 79, 83, 87, and 88; the diagnostic
+  rolling average was about 85.8 FPS.
 
 ## Scope boundary
 
-The live session did not alter the user's character state. Quest accept, abandon,
-failure, objective completion, and reward transitions are covered by the executed
-compatibility-layer tests and should also be exercised on disposable characters
-as the Emberveil client evolves.
+The live session did not accept, abandon, fail, complete, or turn in a quest.
+The immediate rendering fallback for Emberveil's transient unreadable objective
+rows is source-validated and covered by the executed quest-state contract, but a
+fresh quest-accept transition should continue to be included in community beta
+testing as the client evolves.
 
-Russian and Chinese datasets are structurally complete and parse-tested, but this
-pass did not have separate authenticated ruRU, zhCN, or zhTW clients available for
-live font and localized-title verification. The Linux installer was tested through
-Git Bash on Windows, not on every Wine, Proton, or native Linux layout. For those
-reasons the public beta label remains appropriate even though all release-blocking
-gates in the available environment passed.
+Russian and Chinese datasets are structurally complete and parse-tested, but
+separate authenticated ruRU, zhCN, and zhTW clients were not available for live
+font and localized-title verification. The Linux installer was tested through
+Git Bash on Windows, not every Wine, Proton, or native Linux layout. Emberveil
+also exposes no verified passive API for character-wide quests completed before
+KoQuest was installed. Those limits are documented in `docs/known-issues.md`, and
+the public beta label remains appropriate.

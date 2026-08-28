@@ -6,7 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$addon = Join-Path $repo 'addon\pfQuest'
+$addon = Join-Path $repo 'addon\KoQuest'
 $manifestPath = Join-Path $repo 'installer\payload-manifest.sha256'
 $installer = Join-Path $repo 'installer\Install-Questie-Emberveil.ps1'
 $linuxInstaller = Join-Path $repo 'INSTALL_KOQUEST_LINUX.sh'
@@ -15,7 +15,7 @@ function Read-Manifest {
     $entries = @()
     foreach ($line in Get-Content -LiteralPath $manifestPath) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
-        if ($line -notmatch '^([A-Fa-f0-9]{64})\s+\*addon/pfQuest/(.+)$') { throw "Invalid manifest line: $line" }
+        if ($line -notmatch '^([A-Fa-f0-9]{64})\s+\*addon/KoQuest/(.+)$') { throw "Invalid manifest line: $line" }
         $entries += [pscustomobject]@{
             Hash = $Matches[1].ToUpperInvariant()
             Relative = $Matches[2].Replace('/', '\')
@@ -110,6 +110,18 @@ if (-not $SkipInstallerTests) {
             '}'
             'pfQuest_config = { allquestgivers = "1" }'
         ) | Set-Content -LiteralPath $savedVariableFile -Encoding ASCII
+        $historyOnlyRoot = Join-Path $savedVariables 'AccountWide'
+        New-Item -ItemType Directory -Path $historyOnlyRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $historyOnlyRoot 'pfQuest.lua') `
+            -Value 'pfQuest_history = { [42] = { 1, 10 } }' -Encoding ASCII
+
+        $legacy = Join-Path $addOns 'pfQuest'
+        New-Item -ItemType Directory -Path $legacy -Force | Out-Null
+        @(
+            '## Title: KoQuest (legacy folder)'
+            '## Version: EV-2.0.0-beta1.20'
+        ) | Set-Content -LiteralPath (Join-Path $legacy 'pfQuest.toc') -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $legacy 'legacy-marker.txt') -Value 'legacy-koquest' -Encoding ASCII
 
         $timer = [System.Diagnostics.Stopwatch]::StartNew()
         $exitCode = Invoke-InstallerProcess $installer $addOns $state $savedVariables
@@ -125,7 +137,26 @@ if (-not $SkipInstallerTests) {
         }
         $savedBackup = @(Get-ChildItem -LiteralPath (Join-Path $state 'Backups') -Recurse -Filter '*pfQuest.lua' -File)
         if ($savedBackup.Count -eq 0) { throw 'Installer did not back up the repaired SavedVariables file.' }
-        $installed = Join-Path $addOns 'pfQuest'
+        $migratedSavedVariableFile = Join-Path $savedVariables 'KoQuest.lua'
+        if (-not (Test-Path -LiteralPath $migratedSavedVariableFile -PathType Leaf)) {
+            throw 'Installer did not create isolated KoQuest SavedVariables.'
+        }
+        $migratedText = Get-Content -LiteralPath $migratedSavedVariableFile -Raw
+        if ($migratedText -notmatch '(?m)^KoQuest_config[ `t]*=') {
+            throw 'Installer did not migrate KoQuest_config into the isolated namespace.'
+        }
+        if ($migratedText -match '(?m)^pfQuest_config[ `t]*=') {
+            throw 'Installer left a legacy pfQuest_config assignment in KoQuest SavedVariables.'
+        }
+        $historyOnlyMigrated = Get-Content -LiteralPath (Join-Path $historyOnlyRoot 'KoQuest.lua') -Raw
+        if ($historyOnlyMigrated -notmatch '(?m)^KoQuest_history[ `t]*=') {
+            throw 'Installer skipped a history-only account-wide KoQuest SavedVariables file.'
+        }
+        if (Test-Path -LiteralPath $legacy) {
+            throw 'Installer left the recognized legacy KoQuest pfQuest folder active.'
+        }
+
+        $installed = Join-Path $addOns 'KoQuest'
         Assert-TreeMatchesManifest $installed $manifest
 
         $legacyMarker = Join-Path $installed 'legacy-marker.txt'
@@ -134,14 +165,29 @@ if (-not $SkipInstallerTests) {
         if ($exitCode -ne 0) { throw "Upgrade installer test failed with exit code $exitCode." }
         Assert-TreeMatchesManifest $installed $manifest
         if (Test-Path -LiteralPath $legacyMarker) { throw 'Upgrade left an obsolete file in the installed addon.' }
-        $backupMarker = Get-ChildItem -LiteralPath (Join-Path $state 'Backups') -Recurse -Filter 'legacy-marker.txt' -File
+        $backupMarker = @(Get-ChildItem -LiteralPath (Join-Path $state 'Backups') -Recurse -Filter 'legacy-marker.txt' -File)
         if (-not $backupMarker) { throw 'Upgrade did not preserve the previous addon in a backup.' }
+
+        # A genuine upstream pfQuest installation is not KoQuest legacy and
+        # must survive an install/upgrade byte-for-byte.
+        New-Item -ItemType Directory -Path $legacy -Force | Out-Null
+        @(
+            '## Title: pfQuest'
+            '## Version: 6.0.0'
+        ) | Set-Content -LiteralPath (Join-Path $legacy 'pfQuest.toc') -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $legacy 'upstream-marker.txt') -Value 'preserve-me' -Encoding ASCII
+        $exitCode = Invoke-InstallerProcess $installer $addOns $state $savedVariables
+        if ($exitCode -ne 0) { throw "Coexistence installer test failed with exit code $exitCode." }
+        if (-not (Test-Path -LiteralPath (Join-Path $legacy 'upstream-marker.txt') -PathType Leaf)) {
+            throw 'Installer modified or removed a genuine upstream pfQuest installation.'
+        }
+        Assert-TreeMatchesManifest $installed $manifest
 
         $tamperedRoot = Join-Path $testRoot 'TamperedRelease'
         New-Item -ItemType Directory -Path (Join-Path $tamperedRoot 'addon') -Force | Out-Null
         Copy-Item -LiteralPath $addon -Destination (Join-Path $tamperedRoot 'addon') -Recurse -Force
         Copy-Item -LiteralPath (Join-Path $repo 'installer') -Destination $tamperedRoot -Recurse -Force
-        Add-Content -LiteralPath (Join-Path $tamperedRoot 'addon\pfQuest\compat\emberveil.lua') -Value '-- tampered'
+        Add-Content -LiteralPath (Join-Path $tamperedRoot 'addon\KoQuest\compat\emberveil.lua') -Value '-- tampered'
         $tamperedInstaller = Join-Path $tamperedRoot 'installer\Install-Questie-Emberveil.ps1'
         $exitCode = Invoke-InstallerProcess $tamperedInstaller $addOns (Join-Path $testRoot 'TamperedState') $savedVariables
         if ($exitCode -eq 0) { throw 'Tampered-payload installer test unexpectedly succeeded.' }
@@ -152,13 +198,27 @@ if (-not $SkipInstallerTests) {
         & $posixShell -n (Convert-ToMsysPath $linuxInstaller)
         if ($LASTEXITCODE -ne 0) { throw "Linux installer syntax validation failed with exit code $LASTEXITCODE." }
         $linuxAddOns = Join-Path $testRoot 'Linux\Emberveil\live\Azeroth\Interface\AddOns'
+        $linuxSavedVariables = Join-Path $testRoot 'Linux\SavedVariables'
         New-Item -ItemType Directory -Path $linuxAddOns -Force | Out-Null
-        & $posixShell (Convert-ToMsysPath $linuxInstaller) (Convert-ToMsysPath $linuxAddOns) |
+        New-Item -ItemType Directory -Path $linuxSavedVariables -Force | Out-Null
+        $linuxLegacy = Join-Path $linuxAddOns 'pfQuest'
+        New-Item -ItemType Directory -Path $linuxLegacy -Force | Out-Null
+        @(
+            '## Title: KoQuest (legacy folder)'
+            '## Version: EV-2.0.0-beta1.20'
+        ) | Set-Content -LiteralPath (Join-Path $linuxLegacy 'pfQuest.toc') -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $linuxSavedVariables 'pfQuest.lua') -Value 'pfQuest_config = { allquestgivers = "1" }' -Encoding ASCII
+        & $posixShell (Convert-ToMsysPath $linuxInstaller) (Convert-ToMsysPath $linuxAddOns) (Convert-ToMsysPath $linuxSavedVariables) |
             ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { throw "Linux installer test failed with exit code $LASTEXITCODE." }
-        Assert-TreeMatchesManifest (Join-Path $linuxAddOns 'pfQuest') $manifest
+        Assert-TreeMatchesManifest (Join-Path $linuxAddOns 'KoQuest') $manifest
+        if (Test-Path -LiteralPath $linuxLegacy) { throw 'Linux installer left the legacy KoQuest pfQuest folder active.' }
+        $linuxMigrated = Get-Content -LiteralPath (Join-Path $linuxSavedVariables 'KoQuest.lua') -Raw
+        if ($linuxMigrated -notmatch '(?m)^KoQuest_config[ `t]*=') {
+            throw 'Linux installer did not migrate isolated KoQuest SavedVariables.'
+        }
 
-        Write-Host 'PASS: isolated SavedVariables repair, Windows install/upgrade, tamper rejection, and Linux install passed.' -ForegroundColor Green
+        Write-Host 'PASS: namespace migration, pfQuest coexistence, Windows install/upgrade, tamper rejection, and Linux install passed.' -ForegroundColor Green
     } finally {
         if (Test-Path -LiteralPath $testRoot) {
             $resolved = [System.IO.Path]::GetFullPath($testRoot)

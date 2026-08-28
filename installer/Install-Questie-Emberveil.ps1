@@ -12,9 +12,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Version = '2.0.0-beta1.20'
+$Version = '2.0.0-beta1.21'
 $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$SourceRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseRoot 'addon\pfQuest'))
+$SourceRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseRoot 'addon\KoQuest'))
 $ManifestPath = Join-Path $PSScriptRoot 'payload-manifest.sha256'
 
 if ([string]::IsNullOrWhiteSpace($StateRoot)) {
@@ -280,6 +280,24 @@ function Repair-PfQuestSavedVariables {
     $files = @(Find-PfQuestSavedVariableFiles -AddOnsPath $AddOnsPath)
 
     if ($files.Count -eq 0) {
+        $exactFiles = @()
+        foreach ($root in @(Get-SavedVariablesSearchRoots -AddOnsPath $AddOnsPath)) {
+            try {
+                $exactFiles += @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+                    $_.Name -ieq 'pfQuest.lua' -or $_.Name -ieq 'pfQuest.lua.bak'
+                })
+            } catch {}
+        }
+        if ($exactFiles.Count -gt 0) {
+            Write-InstallLog "No unsafe beta1.15 tracking signature found in $($exactFiles.Count) legacy SavedVariables file(s)." Green
+            return [pscustomobject]@{
+                Found = $exactFiles.Count
+                Repaired = 0
+                Quarantined = 0
+                Diagnostic = $null
+            }
+        }
+
         Write-InstallLog 'WARNING: No pfQuest SavedVariables file was found to inspect.' Yellow
         Write-InstallLog 'If this machine previously crashed with the beta1.15 tracking-path LUA PANIC, recovery was NOT performed.' Yellow
         Write-InstallLog 'A diagnostic file will be written so the SavedVariables location can be identified.' Yellow
@@ -361,6 +379,87 @@ function Repair-PfQuestSavedVariables {
     }
 }
 
+function Test-LegacyKoQuestFolder {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+    foreach ($tocName in @('pfQuest.toc', 'KoQuest.toc')) {
+        $tocPath = Join-Path $Path $tocName
+        if (-not (Test-Path -LiteralPath $tocPath -PathType Leaf)) { continue }
+        try {
+            $toc = Get-Content -LiteralPath $tocPath -Raw
+            if ($toc -match '(?im)^## Title:.*KoQuest' -and $toc -match '(?im)^## Version:\s*EV-') {
+                return $true
+            }
+        } catch {}
+    }
+    return $false
+}
+
+function Migrate-LegacyKoQuestSavedVariables {
+    param([Parameter(Mandatory = $true)][string]$AddOnsPath)
+
+    # Once the installed folder metadata has proved this is legacy KoQuest,
+    # migrate every exact pfQuest.lua file inside the already-scoped roots.
+    # Some account-wide files contain only history/cache tables and therefore
+    # do not match the older crash-repair signature filter.
+    $files = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
+    $seenFiles = @{}
+    $excludedBackupRoot = (Get-NormalizedPath $BackupRoot).ToLowerInvariant()
+    foreach ($root in @(Get-SavedVariablesSearchRoots -AddOnsPath $AddOnsPath)) {
+        $named = @()
+        try {
+            $named = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+                $_.Name -ieq 'pfQuest.lua' -and $_.Length -le 16777216
+            })
+        } catch {}
+        foreach ($file in $named) {
+            $full = Get-NormalizedPath $file.FullName
+            if ($full.ToLowerInvariant().StartsWith($excludedBackupRoot)) { continue }
+            $key = $full.ToLowerInvariant()
+            if (-not $seenFiles.ContainsKey($key)) {
+                $seenFiles[$key] = $true
+                $files.Add($file)
+            }
+        }
+    }
+
+    if ($files.Count -eq 0) {
+        Write-InstallLog 'No legacy KoQuest SavedVariables were found to migrate.' DarkGray
+        return 0
+    }
+
+    $replacements = @(
+        @('pfQuest_confirmedAvailable', 'KoQuest_confirmedAvailable'),
+        @('pfQuest_questcache', 'KoQuest_questcache'),
+        @('pfQuest_config', 'KoQuest_config'),
+        @('pfBrowser_fav', 'KoBrowser_fav'),
+        @('pfQuest_history', 'KoQuest_history'),
+        @('pfQuest_colors', 'KoQuest_colors'),
+        @('pfQuest_server', 'KoQuest_server'),
+        @('pfQuest_track', 'KoQuest_track'),
+        @('Interface\\AddOns\\pfQuest', 'Interface\\AddOns\\KoQuest')
+    )
+    $byteEncoding = [System.Text.Encoding]::GetEncoding(28591)
+    $migrated = 0
+
+    foreach ($file in $files) {
+        $target = Join-Path $file.DirectoryName 'KoQuest.lua'
+        if (Test-Path -LiteralPath $target) {
+            Write-InstallLog "Kept existing KoQuest SavedVariables: $target" Yellow
+            continue
+        }
+
+        $text = $byteEncoding.GetString([System.IO.File]::ReadAllBytes($file.FullName))
+        foreach ($pair in $replacements) { $text = $text.Replace($pair[0], $pair[1]) }
+        [System.IO.File]::WriteAllBytes($target, $byteEncoding.GetBytes($text))
+        $migrated++
+        Write-InstallLog "Migrated legacy KoQuest SavedVariables to: $target" Green
+    }
+
+    return $migrated
+}
+
 function Read-PayloadManifest {
     if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
         throw "Missing payload checksum manifest: $ManifestPath"
@@ -369,10 +468,10 @@ function Read-PayloadManifest {
     $entries = @()
     foreach ($line in Get-Content -LiteralPath $ManifestPath) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
-        if ($line -notmatch '^([A-Fa-f0-9]{64})\s+\*(addon/pfQuest/.+)$') {
+        if ($line -notmatch '^([A-Fa-f0-9]{64})\s+\*(addon/KoQuest/.+)$') {
             throw "Invalid payload manifest line: $line"
         }
-        $relative = $Matches[2].Substring('addon/pfQuest/'.Length).Replace('/', '\')
+        $relative = $Matches[2].Substring('addon/KoQuest/'.Length).Replace('/', '\')
         if ([System.IO.Path]::IsPathRooted($relative) -or $relative.Split('\') -contains '..') {
             throw "Unsafe payload manifest path: $relative"
         }
@@ -404,7 +503,7 @@ function Assert-Payload {
         if ($actual -ne $entry.Hash) { throw "$Label hash mismatch: $($entry.Relative)." }
     }
 
-    $tocPath = Join-Path $fullRoot 'pfQuest.toc'
+    $tocPath = Join-Path $fullRoot 'KoQuest.toc'
     $toc = Get-Content -LiteralPath $tocPath -Raw
     if ($toc -notmatch [regex]::Escape("## Version: EV-$Version")) {
         throw "$Label has the wrong addon version. Expected EV-$Version."
@@ -459,12 +558,15 @@ try {
     }
     if (-not (Test-AddOnsPath $addOns)) { throw "Unsafe or invalid AddOns target: $addOns" }
 
-    $target = Get-NormalizedPath (Join-Path $addOns 'pfQuest')
+    $target = Get-NormalizedPath (Join-Path $addOns 'KoQuest')
     if ((Get-NormalizedPath ([System.IO.Path]::GetDirectoryName($target))) -ine (Get-NormalizedPath $addOns) -or
-        [System.IO.Path]::GetFileName($target) -ine 'pfQuest') {
+        [System.IO.Path]::GetFileName($target) -ine 'KoQuest') {
         throw "Refusing unexpected target path: $target"
     }
     if ($target -ieq $SourceRoot) { throw 'Source and installation target resolve to the same path.' }
+
+    $legacy = Get-NormalizedPath (Join-Path $addOns 'pfQuest')
+    $legacyKoQuest = Test-LegacyKoQuestFolder -Path $legacy
 
     Write-InstallLog "Target: $target" Cyan
     if ($SkipSavedVariablesRepair) {
@@ -476,24 +578,43 @@ try {
             Write-InstallLog 'NOTE: Addon installation will continue, but no legacy SavedVariables file was located.' Yellow
         }
     }
+    if ($legacyKoQuest) {
+        Write-InstallLog 'Recognized a beta1.20-or-older KoQuest installation in the legacy pfQuest folder.' Yellow
+        $migratedSavedVariables = Migrate-LegacyKoQuestSavedVariables -AddOnsPath $addOns
+        Write-InstallLog "Legacy KoQuest SavedVariables migrated: $migratedSavedVariables file(s)." Cyan
+    }
+
     $token = [guid]::NewGuid().ToString('N')
     $stageRoot = Join-Path $addOns ".qev-stage-$token"
-    $stageTarget = Join-Path $stageRoot 'pfQuest'
+    $stageTarget = Join-Path $stageRoot 'KoQuest'
     $rollback = Join-Path $addOns ".qev-rollback-$token"
+    $legacyRollback = Join-Path $addOns ".koquest-legacy-$token"
     $installed = $false
+    $legacyMoved = $false
 
     try {
         New-Item -ItemType Directory -Path $stageRoot | Out-Null
         Copy-Item -LiteralPath $SourceRoot -Destination $stageRoot -Recurse -Force
         Assert-Payload $stageTarget $manifest 'Staged payload'
 
-        if (Test-Path -LiteralPath $target -PathType Container) {
+        $hasCurrent = Test-Path -LiteralPath $target -PathType Container
+        if ($hasCurrent -or $legacyKoQuest) {
             $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
             $backupParent = Join-Path $BackupRoot "$stamp-$token"
             New-Item -ItemType Directory -Path $backupParent -Force | Out-Null
+        }
+
+        if ($hasCurrent) {
             Copy-Item -LiteralPath $target -Destination $backupParent -Recurse -Force
-            Write-InstallLog "Existing pfQuest backed up to: $backupParent" Yellow
+            Write-InstallLog "Existing KoQuest backed up to: $backupParent" Yellow
             Move-Item -LiteralPath $target -Destination $rollback
+        }
+
+        if ($legacyKoQuest) {
+            Copy-Item -LiteralPath $legacy -Destination (Join-Path $backupParent 'pfQuest-legacy-KoQuest') -Recurse -Force
+            Move-Item -LiteralPath $legacy -Destination $legacyRollback
+            $legacyMoved = $true
+            Write-InstallLog "Legacy KoQuest pfQuest folder backed up to: $backupParent" Yellow
         }
 
         try {
@@ -502,11 +623,15 @@ try {
             $installed = $true
         } catch {
             if (Test-Path -LiteralPath $target) {
-                Remove-PrivateDirectory $target $addOns 'pfQuest'
+                Remove-PrivateDirectory $target $addOns 'KoQuest'
             }
             if (Test-Path -LiteralPath $rollback) {
                 Move-Item -LiteralPath $rollback -Destination $target
-                Write-InstallLog 'Installation failed; the previous pfQuest folder was restored.' Yellow
+                Write-InstallLog 'Installation failed; the previous KoQuest folder was restored.' Yellow
+            }
+            if ($legacyMoved -and (Test-Path -LiteralPath $legacyRollback) -and -not (Test-Path -LiteralPath $legacy)) {
+                Move-Item -LiteralPath $legacyRollback -Destination $legacy
+                Write-InstallLog 'Installation failed; the legacy KoQuest pfQuest folder was restored.' Yellow
             }
             throw
         }
@@ -514,6 +639,25 @@ try {
         if (Test-Path -LiteralPath $rollback) {
             Remove-PrivateDirectory $rollback $addOns '.qev-rollback-'
         }
+        if (Test-Path -LiteralPath $legacyRollback) {
+            Remove-PrivateDirectory $legacyRollback $addOns '.koquest-legacy-'
+        }
+    } catch {
+        # Cover failures during backup/migration as well as payload placement.
+        # The inner catch handles the common install failure; these guards are
+        # idempotent when that recovery has already completed.
+        if (Test-Path -LiteralPath $rollback) {
+            if (Test-Path -LiteralPath $target) {
+                Remove-PrivateDirectory $target $addOns 'KoQuest'
+            }
+            Move-Item -LiteralPath $rollback -Destination $target
+            Write-InstallLog 'Recovered the previous KoQuest folder after an installer error.' Yellow
+        }
+        if ($legacyMoved -and (Test-Path -LiteralPath $legacyRollback) -and -not (Test-Path -LiteralPath $legacy)) {
+            Move-Item -LiteralPath $legacyRollback -Destination $legacy
+            Write-InstallLog 'Recovered the legacy KoQuest pfQuest folder after an installer error.' Yellow
+        }
+        throw
     } finally {
         if (Test-Path -LiteralPath $stageRoot) {
             Remove-PrivateDirectory $stageRoot $addOns '.qev-stage-'
@@ -522,7 +666,7 @@ try {
 
     if (-not $installed) { throw 'Installation did not reach the verified state.' }
     Write-InstallLog "DONE: KoQuest $Version installed and verified." Green
-    Write-InstallLog 'Restart Emberveil completely, then enable pfQuest in the AddOns list.' Green
+    Write-InstallLog 'Restart Emberveil completely, then enable KoQuest in the AddOns list.' Green
     Write-InstallLog "Log: $LogPath"
     exit 0
 } catch {
