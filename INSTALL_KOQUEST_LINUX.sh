@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-VERSION='2.0.0-beta1.21'
+VERSION='2.0.0-beta1.22'
 SCRIPT_DIR=$(CDPATH= cd -P "$(dirname "$0")" && pwd)
 SOURCE_ROOT="$SCRIPT_DIR/addon/KoQuest"
 MANIFEST="$SCRIPT_DIR/installer/payload-manifest.sha256"

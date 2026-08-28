@@ -1,6 +1,8 @@
-# KoQuest 2.0.0-beta1.21 — Launcher, Namespace, and Quest-Node Repair
+# KoQuest 2.0.0-beta1.22 — Settings UX, Launcher, Namespace, and Quest-Node Repair
 
 This update addresses every actionable report from the recent KoQuest addon-page comments: failed/hanging launcher downloads, the pfQuest installation collision, accepted objectives appearing only after the first kill, and low FPS in dense questing zones.
+
+It also removes the misleading route-arrow controls from the settings and first-run screens. Emberveil does not expose trustworthy player-facing data, so KoQuest keeps the unsafe legacy arrow disabled and explains the limitation if an older user invokes `/kodb arrow`.
 
 ## Download and installation
 

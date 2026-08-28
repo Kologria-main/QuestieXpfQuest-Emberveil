@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0-beta1.22 — 2026-08-28
+
+- Remove the route-arrow checkbox from the settings and first-run screens because Emberveil does not expose trustworthy player-facing data.
+- Keep the legacy arrow value safely locked off and make `/kodb arrow` explain the client limitation instead of silently toggling a nonfunctional feature.
+- Make the welcome screen re-read the current mode whenever it opens, give each mode button a unique frame name, and route Save & Close through the same safe settings-application path as the full config screen.
+- Keep the settings layout deterministic, refresh edited text settings immediately on save, and clamp map/tracker transparency, tracker font size, and drop-chance inputs to safe ranges.
+- Add source-validation contracts that prevent the unsupported arrow control from being exposed again.
+- Preserve every beta1.21 launcher, namespace, quest-marker, tooltip, localization, migration, and performance fix unchanged.
+
 ## 2.0.0-beta1.21 — 2026-08-28
 
 - Replace the Emberveil-facing download with a minimal launcher-compatible ZIP whose root is exactly `KoQuest/KoQuest.toc`; move installers and documentation into a separately named full offline package.

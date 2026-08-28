@@ -3,7 +3,7 @@
 ## Author: Shagu (pfQuest) + Emberveil compatibility port
 ## Notes: Safe quest helper and localized database for Emberveil.
 ## Notes-ruRU: Безопасный помощник заданий и локализованная база данных для Emberveil
-## Version: EV-2.0.0-beta1.21
+## Version: EV-2.0.0-beta1.22
 ## OptionalDeps: pfUI
 ## SavedVariables: KoQuest_questcache
 ## SavedVariablesPerCharacter: KoQuest_config, KoBrowser_fav, KoQuest_history, KoQuest_colors, KoQuest_server, KoQuest_track, KoQuest_confirmedAvailable

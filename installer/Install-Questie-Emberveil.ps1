@@ -12,7 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Version = '2.0.0-beta1.21'
+$Version = '2.0.0-beta1.22'
 $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $SourceRoot = [System.IO.Path]::GetFullPath((Join-Path $ReleaseRoot 'addon\KoQuest'))
 $ManifestPath = Join-Path $PSScriptRoot 'payload-manifest.sha256'

@@ -2,7 +2,7 @@
 
 Quest and objective markers for the Emberveil client, built from the proven [pfQuest](https://github.com/shagu/pfQuest) engine and adapted for Emberveil's Unreal-backed UI and Vanilla-style Lua API.
 
-Current development release: **2.0.0-beta1.21**
+Current development release: **2.0.0-beta1.22**
 
 > KoQuest is a community beta, not an official Emberveil addon. It is deliberately conservative: if the client cannot prove that a coordinate or quest state is valid, the addon hides the affected marker instead of showing a potentially wrong one.
 
@@ -21,7 +21,7 @@ Current development release: **2.0.0-beta1.21**
 
 ## Download and install
 
-Download the primary `KoQuest_Emberveil_v2.0.0-beta1.21.zip` from this repository's [GitHub Releases page](https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases). It is the Emberveil-launcher-compatible package: the ZIP contains `KoQuest/KoQuest.toc` directly at its root and nothing outside the runtime addon. The release asset and all readable source are hosted in this same public repository, as required by Emberveil's addon rules.
+Download the primary `KoQuest_Emberveil_v2.0.0-beta1.22.zip` from this repository's [GitHub Releases page](https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases). It is the Emberveil-launcher-compatible package: the ZIP contains `KoQuest/KoQuest.toc` directly at its root and nothing outside the runtime addon. The release asset and all readable source are hosted in this same public repository, as required by Emberveil's addon rules.
 
 For Emberveil's launcher/site installer, use the primary ZIP. For a manual installation, exit Emberveil completely, extract it, and copy its `KoQuest` folder into `Interface\AddOns`.
 
@@ -41,7 +41,7 @@ The usual Windows launcher installation is:
 
 Those builds used a `pfQuest` folder. The full offline installers recognize only a legacy folder whose TOC identifies **KoQuest**, back it up, migrate its settings/history into `KoQuest.lua`, and remove the duplicate. A genuine upstream pfQuest folder is left untouched.
 
-If you update through the Emberveil launcher or install manually, exit the game and inspect `Interface\AddOns\pfQuest\pfQuest.toc`. If its title says **KoQuest**, remove that old `pfQuest` folder before installing beta1.21. Never remove it when the title says **pfQuest**. The new isolated `KoQuest` folder and genuine pfQuest can coexist.
+If you update through the Emberveil launcher or install manually, exit the game and inspect `Interface\AddOns\pfQuest\pfQuest.toc`. If its title says **KoQuest**, remove that old `pfQuest` folder before installing beta1.22. Never remove it when the title says **pfQuest**. The new isolated `KoQuest` folder and genuine pfQuest can coexist.
 
 Restart Emberveil completely after installing. See [Installation](docs/installation.md) for alternate paths, upgrades, rollback, and uninstall steps.
 
@@ -78,7 +78,7 @@ pnpm validate
 powershell -NoProfile -File .\scripts\validate-release.ps1
 ```
 
-The exact beta1.21 evidence is recorded in [Release validation](docs/release-validation.md). The broader scope and remaining client-dependent checks are documented in [Testing](docs/testing.md) and [Known issues](docs/known-issues.md).
+The exact beta1.22 evidence is recorded in [Release validation](docs/release-validation.md). The broader scope and remaining client-dependent checks are documented in [Testing](docs/testing.md) and [Known issues](docs/known-issues.md).
 
 ## Credits and license
 

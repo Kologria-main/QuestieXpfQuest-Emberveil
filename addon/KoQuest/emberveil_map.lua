@@ -1,5 +1,5 @@
 -- KoQuest for Emberveil / KoQuest map engine
--- v2.0.0-beta1.21
+-- v2.0.0-beta1.22
 --
 -- Design:
 --   * KoQuest database + quest parser

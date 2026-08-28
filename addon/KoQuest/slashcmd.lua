@@ -11,7 +11,6 @@ SlashCmdList["KOQUESTDB"] = function(input, editbox)
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc/kodb|cffffffff lock |cffcccccc - " .. KoQuest_Loc["Lock map tracker"])
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc/kodb|cffffffff tracker |cffcccccc - " .. KoQuest_Loc["Show map tracker"])
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc/kodb|cffffffff journal |cffcccccc - " .. KoQuest_Loc["Show quest journal"])
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc/kodb|cffffffff arrow |cffcccccc - " .. KoQuest_Loc["Show quest arrow"])
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc/kodb|cffffffff show |cffcccccc - " .. KoQuest_Loc["Show database interface"])
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc/kodb|cffffffff config |cffcccccc - " .. KoQuest_Loc["Show configuration interface"])
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc/kodb|cffffffff locale |cffcccccc - " .. KoQuest_Loc["Display addon locales"])
@@ -289,12 +288,9 @@ SlashCmdList["KOQUESTDB"] = function(input, editbox)
 
   -- argument: arrow
   if (arg1 == "arrow") then
-    if KoQuest_config["arrow"] == "1" then
-      KoQuest_config["arrow"] = "0"
-      KoQuest.route.arrow:Hide()
-    else
-      KoQuest_config["arrow"] = "1"
-    end
+    KoQuest_config["arrow"] = "0"
+    if KoQuest.route and KoQuest.route.arrow then KoQuest.route.arrow:Hide() end
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccKo|cffffffffQuest: Route arrows are unavailable on Emberveil because the client does not expose trustworthy facing data.")
     return
   end
 

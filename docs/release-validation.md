@@ -1,4 +1,4 @@
-# Release validation: 2.0.0-beta1.21
+# Release validation: 2.0.0-beta1.22
 
 Validation date: 2026-08-28
 
@@ -6,7 +6,7 @@ Target: Emberveil live client 1.12.1, launcher build/revision 2312, Windows x64
 
 ## Release result
 
-`2.0.0-beta1.21` passed the repository's source, quest-state, package,
+`2.0.0-beta1.22` passed the repository's source, quest-state, package,
 installer, namespace-isolation, localization-coverage, and payload-integrity
 gates. The exact addon payload was installed into the path-qualified Emberveil
 client and exercised at Sentinel Hill, Westfall. The live pass covered legacy
@@ -66,7 +66,7 @@ No similarly named WoW client or unrelated game process was used.
   duplicate legacy KoQuest folder loaded.
 - The client entered the world on the level 11 rogue Kologria at Sentinel Hill,
   Westfall, without a visible Lua error, crash, frozen UI, or startup loop.
-- Startup reported compatibility and map-engine version `2.0.0-beta1.21`, a
+- Startup reported compatibility and map-engine version `2.0.0-beta1.22`, a
   reconciled quest state, and local best-effort completion history.
 - The tracker displayed seven active quests and their objective progress.
 - Database-matched available quest-giver `!` markers and active objective circles
@@ -79,6 +79,17 @@ No similarly named WoW client or unrelated game process was used.
   `Goretusk Liver Pie`, and `Goretusk Liver: 0/8 36.96%`.
 - Closing the world map restored the minimap nodes on the next scheduled
   projection.
+- The full settings panel opened in stable source order with all labels and
+  controls visible. The unsupported route-arrow checkbox was absent. Every
+  remaining visible setting has a validated runtime consumer outside the config
+  screen.
+- The welcome screen opened cleanly, displayed only Simple Markers, Combined,
+  and Spawn Points, highlighted the saved Combined mode, and Save & Close used
+  the same safe application/rebuild path as the full settings panel.
+- An intentionally excessive tracker font size of `999` was clamped to the safe
+  maximum `32` when applied; the player's original value `12` was then restored
+  and saved. The legacy `/kodb arrow` command kept the feature disabled and
+  explained the missing trustworthy-facing API instead of silently toggling it.
 - `/koquest` reported 1,009 cached Westfall nodes, 80 spatial candidates,
   224 visible world-map nodes, 27 visible minimap nodes, 212 visible objective
   buttons from 997 objective coordinates, and a six-percent compaction grid.
