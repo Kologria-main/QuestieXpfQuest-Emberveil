@@ -1,6 +1,6 @@
 # Installation
 
-Use `KoQuest_Emberveil_v2.0.0-beta1.21.zip` for the Emberveil launcher or a normal manual install. It contains exactly one root addon folder:
+Use `KoQuest_Emberveil_v2.0.0-beta1.22.zip` for the Emberveil launcher or a normal manual install. It contains exactly one root addon folder:
 
 ```text
 KoQuest/KoQuest.toc
@@ -8,14 +8,14 @@ KoQuest/compat/emberveil.lua
 KoQuest/emberveil_map.lua
 ```
 
-The separate `KoQuest_Emberveil_v2.0.0-beta1.21_Full_Offline_Package.zip` contains the same runtime addon plus documentation and optional Windows/Linux installers.
+The separate `KoQuest_Emberveil_v2.0.0-beta1.22_Full_Offline_Package.zip` contains the same runtime addon plus documentation and optional Windows/Linux installers.
 
 ## Updating from beta1.20 or older
 
-Old KoQuest builds installed into `Interface/AddOns/pfQuest`, which can collide with the real pfQuest addon. beta1.21 uses an isolated `KoQuest` directory, SavedVariables, globals, frames, slash commands, and map-node buckets.
+Old KoQuest builds installed into `Interface/AddOns/pfQuest`, which can collide with the real pfQuest addon. beta1.22 uses an isolated `KoQuest` directory, SavedVariables, globals, frames, slash commands, and map-node buckets.
 
 - Full offline installer: automatically recognizes an old `pfQuest` folder only when its TOC title says KoQuest and its version begins with `EV-`. It backs that folder up, migrates settings/history to `KoQuest.lua`, and removes the duplicate. A genuine pfQuest folder is preserved.
-- Emberveil launcher/manual update: exit the game and inspect `Interface/AddOns/pfQuest/pfQuest.toc`. If the title says **KoQuest**, remove only that old `pfQuest` folder before installing beta1.21. If the title says **pfQuest**, keep it.
+- Emberveil launcher/manual update: exit the game and inspect `Interface/AddOns/pfQuest/pfQuest.toc`. If the title says **KoQuest**, remove only that old `pfQuest` folder before installing beta1.22. If the title says **pfQuest**, keep it.
 
 The new KoQuest and a genuine pfQuest can coexist. KoQuest also detects and disables a clearly identified legacy KoQuest `pfQuest` folder, then prints a removal/restart warning, as a last-resort duplicate-load guard.
 

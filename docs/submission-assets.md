@@ -4,7 +4,7 @@ These are real KoQuest screenshots recovered from the existing moderated addon
 page. They are included in the same public repository so future submissions can
 use stable, reviewable files.
 
-Recommended order for beta1.21:
+Recommended order for beta1.22:
 
 1. `assets/screenshots/koquest-minimap-tracker.png` - minimap markers, an objective tooltip, and the quest tracker.
 2. `assets/screenshots/koquest-tracker.png` - tracker rows and objectives.
@@ -13,9 +13,9 @@ Recommended order for beta1.21:
 
 Optional alternate: `assets/screenshots/koquest-tooltip.png`.
 
-Do not use `assets/screenshots/koquest-world-map.png` for beta1.21. It is a real
+Do not use `assets/screenshots/koquest-world-map.png` for beta1.22. It is a real
 screenshot from the older moderated page, but it predates the bounded,
-tooltip-capable world-map objective renderer. Capture a fresh beta1.21 world-map
+tooltip-capable world-map objective renderer. Capture a fresh beta1.22 world-map
 screenshot showing the colored circles and one open objective tooltip before
 replacing the live page gallery.
 

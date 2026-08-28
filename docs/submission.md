@@ -25,7 +25,7 @@ https://github.com/Kologria-main/QuestieXpfQuest-Emberveil
 **Download**
 
 ```text
-https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases/download/v2.0.0-beta1.21/KoQuest_Emberveil_v2.0.0-beta1.21.zip
+https://github.com/Kologria-main/QuestieXpfQuest-Emberveil/releases/download/v2.0.0-beta1.22/KoQuest_Emberveil_v2.0.0-beta1.22.zip
 ```
 
 **Short description**
@@ -51,13 +51,13 @@ Current deliberate safeguards: party/raid interior minimap pins and the route ar
 **Version**
 
 ```text
-2.0.0-beta1.21
+2.0.0-beta1.22
 ```
 
 ## Files and final checks
 
 - Icon: `assets/icon.png` (PNG, under 10 MB).
 - Screenshots: use the real gallery images listed in `docs/submission-assets.md`; do not fabricate in-game evidence.
-- Confirm the repository and `v2.0.0-beta1.21` release are visible while logged out.
+- Confirm the repository and `v2.0.0-beta1.22` release are visible while logged out.
 - Confirm the download is the GitHub Release asset above and its SHA-256 matches `dist/SHA256SUMS.txt`.
 - Confirm the site displays the new version and primary launcher ZIP rather than the beta1.20 offline bundle.

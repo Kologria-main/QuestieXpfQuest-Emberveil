@@ -147,8 +147,6 @@ KoQuest_defconfig = {
     default = "0", type = "checkbox", config = "routestarter" },
   { text = L["Show Route On Minimap"],
     default = "0", type = "checkbox", config = "routeminimap" },
-  { text = L["Show Arrow Along Routes"],
-    default = "0", type = "checkbox", config = "arrow" },
 
   { text = L["User Data"],
     default = nil, type = "header" },
@@ -294,7 +292,7 @@ function KoQuestConfig:LoadConfig()
     KoQuest_config["availabilitydefaultv2"] = "1"
   end
 
-  for id, data in pairs(KoQuest_defconfig) do
+  for id, data in ipairs(KoQuest_defconfig) do
     if data.config and not KoQuest_config[data.config] then
       KoQuest_config[data.config] = data.default
     end
@@ -332,7 +330,7 @@ local configframes = {}
 function KoQuestConfig:CreateConfigEntries(config)
   local count = 1
 
-  for _, data in pairs(config) do
+  for _, data in ipairs(config) do
     if data.type then
       -- basic frame
       local frame = CreateFrame("Frame", "KoQuestConfig" .. count, KoQuestConfig)
@@ -398,6 +396,7 @@ function KoQuestConfig:CreateConfigEntries(config)
 
         frame.input:SetScript("OnTextChanged", function(self)
           KoQuest_config[this.config] = this:GetText()
+          KoQuestConfig.emberveilNeedsRebuild = true
         end)
 
         pfUI.api.CreateBackdrop(frame.input, nil, true)
@@ -432,7 +431,7 @@ function KoQuestConfig:CreateConfigEntries(config)
   width = maxtext + 100
   local column, row = 1, 0
 
-  for _, data in pairs(config) do
+  for _, data in ipairs(config) do
     if data.type then
       -- empty line for headers, next column for > 20 entries
       row = row + ( data.type == "header" and row > 1 and 2 or 1 )
@@ -459,7 +458,7 @@ function KoQuestConfig:CreateConfigEntries(config)
 end
 
 function KoQuestConfig:UpdateConfigEntries()
-  for _, data in pairs(KoQuest_defconfig) do
+  for _, data in ipairs(KoQuest_defconfig) do
     if data.type and configframes[data.text] then
       if data.type == "checkbox" then
         configframes[data.text].input:SetChecked((KoQuest_config[data.config] == "1" and true or nil))
@@ -481,6 +480,15 @@ local function KoQuestEVClamp01(value, fallback)
   return n
 end
 
+local function KoQuestEVClampRange(value, fallback, minimum, maximum, whole)
+  local n = tonumber(value)
+  if not n then n = fallback end
+  if n < minimum then n = minimum end
+  if n > maximum then n = maximum end
+  if whole then n = math.floor(n + 0.5) end
+  return n
+end
+
 function KoQuestConfig:ApplyEmberveilSettings(rebuild)
   if type(KoQuest_config) ~= "table" then
     KoQuest_config = {}
@@ -490,10 +498,16 @@ function KoQuestConfig:ApplyEmberveilSettings(rebuild)
   local worldAlpha = KoQuestEVClamp01(KoQuest_config["worldmaptransp"], 1.0)
   local miniAlpha = KoQuestEVClamp01(KoQuest_config["minimaptransp"], 1.0)
   local fadeAlpha = KoQuestEVClamp01(KoQuest_config["nodefade"], 0.3)
+  local trackerAlpha = KoQuestEVClamp01(KoQuest_config["trackeralpha"], 0.0)
+  local trackerFontSize = KoQuestEVClampRange(KoQuest_config["trackerfontsize"], 12, 8, 32, true)
+  local minDropChance = KoQuestEVClampRange(KoQuest_config["mindropchance"], 1, 0, 100, false)
 
   KoQuest_config["worldmaptransp"] = tostring(worldAlpha)
   KoQuest_config["minimaptransp"] = tostring(miniAlpha)
   KoQuest_config["nodefade"] = tostring(fadeAlpha)
+  KoQuest_config["trackeralpha"] = tostring(trackerAlpha)
+  KoQuest_config["trackerfontsize"] = tostring(trackerFontSize)
+  KoQuest_config["mindropchance"] = tostring(minDropChance)
 
   -- Apply alpha to nodes that already exist; new nodes read these config
   -- values through KoMap:BuildNode().
@@ -565,7 +579,6 @@ function KoQuestConfig:EmberveilRefreshAfterReset()
 end
 do -- welcome/init popup dialog
   local config_stage = {
-    arrow = 1,
     mode = 2
   }
 
@@ -599,29 +612,26 @@ do -- welcome/init popup dialog
 
   KoQuestInit:SetScript("OnEvent", function()
     if KoQuest_config.welcome ~= "1" then
-      -- parse current config
-      if KoQuest_config["showspawn"] == "0" and KoQuest_config["showcluster"] == "1" then
-        config_stage.mode = 1
-      elseif KoQuest_config["showspawn"] == "1" and KoQuest_config["showcluster"] == "0" then
-        config_stage.mode = 3
-      end
-
-      if KoQuest_config["arrow"] == "0" then
-        config_stage.arrow = nil
-      end
-
       KoQuestInit:Show()
     end
     this:UnregisterAllEvents()
   end)
 
   KoQuestInit:SetScript("OnShow", function()
+    -- Re-read the current settings every time this screen is opened. This
+    -- keeps the selected card accurate after changes in the full config UI.
+    config_stage.mode = 2
+    if KoQuest_config["showspawn"] == "0" and KoQuest_config["showcluster"] == "1" then
+      config_stage.mode = 1
+    elseif KoQuest_config["showspawn"] == "1" and KoQuest_config["showcluster"] == "0" then
+      config_stage.mode = 3
+    end
+
     -- reload ui elements
     desaturate(KoQuestInit[1].bg, true)
     desaturate(KoQuestInit[2].bg, true)
     desaturate(KoQuestInit[3].bg, true)
     desaturate(KoQuestInit[config_stage.mode].bg, false)
-    KoQuestInit.checkbox:SetChecked(config_stage.arrow)
   end)
 
   pfUI.api.CreateBackdrop(KoQuestInit, nil, true, 0.85)
@@ -642,8 +652,8 @@ do -- welcome/init popup dialog
       tooltip = L["Display all spawn points of each quest objective and hide summarized cluster icons."] },
   }
 
-  for i, button in pairs(buttons) do
-    KoQuestInit[i] = CreateFrame("Button", "KoQuestInitLeft", KoQuestInit)
+  for i, button in ipairs(buttons) do
+    KoQuestInit[i] = CreateFrame("Button", "KoQuestInitMode" .. i, KoQuestInit)
     KoQuestInit[i]:SetWidth(120)
     KoQuestInit[i]:SetHeight(160)
     KoQuestInit[i]:SetPoint(unpack(button.position))
@@ -688,36 +698,6 @@ do -- welcome/init popup dialog
     end)
   end
 
-  -- show arrows
-  KoQuestInit.checkbox = CreateFrame("CheckButton", nil, KoQuestInit, "UICheckButtonTemplate")
-  KoQuestInit.checkbox:SetPoint("BOTTOMLEFT", 10, 10)
-  KoQuestInit.checkbox:SetNormalTexture("")
-  KoQuestInit.checkbox:SetPushedTexture("")
-  KoQuestInit.checkbox:SetHighlightTexture("")
-  KoQuestInit.checkbox:SetWidth(22)
-  KoQuestInit.checkbox:SetHeight(22)
-  pfUI.api.CreateBackdrop(KoQuestInit.checkbox, nil, true)
-
-  KoQuestInit.checkbox.caption = KoQuestInit:CreateFontString("Status", "LOW", "GameFontWhite")
-  KoQuestInit.checkbox.caption:SetPoint("LEFT", KoQuestInit.checkbox, "RIGHT", 5, 0)
-  KoQuestInit.checkbox.caption:SetJustifyH("LEFT")
-  KoQuestInit.checkbox.caption:SetText(L["Show Navigation Arrow"])
-  KoQuestInit.checkbox:SetScript("OnClick", function()
-    config_stage.arrow = this:GetChecked()
-  end)
-
-  KoQuestInit.checkbox:SetScript("OnEnter", function()
-    GameTooltip_SetDefaultAnchor(GameTooltip, this)
-    GameTooltip:SetText(L["Navigation Arrow"])
-    GameTooltip:AddLine(L["Show navigation arrow that points you to the nearest quest location."], 1, 1, 1, true)
-    GameTooltip:SetWidth(100)
-    GameTooltip:Show()
-  end)
-
-  KoQuestInit.checkbox:SetScript("OnLeave", function()
-    GameTooltip:Hide()
-  end)
-
   -- save button
   KoQuestInit.save = CreateFrame("Button", nil, KoQuestInit)
   KoQuestInit.save:SetWidth(100)
@@ -748,15 +728,13 @@ do -- welcome/init popup dialog
       KoQuest_config["showclustermini"] = "0"
     end
 
-    if config_stage.arrow then
-      KoQuest_config["arrow"] = "1"
-    else
-      KoQuest_config["arrow"] = "0"
-    end
+    -- Emberveil does not expose trustworthy facing data. Keep the legacy
+    -- value disabled instead of offering a control that cannot work safely.
+    KoQuest_config["arrow"] = "0"
 
     -- save welcome flag and reload
     KoQuest_config["welcome"] = "1"
-    KoQuest:ResetAll()
+    KoQuestConfig:ApplyEmberveilSettings(true)
     KoQuestInit:Hide()
   end)
 end

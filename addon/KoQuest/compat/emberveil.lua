@@ -1,9 +1,9 @@
 -- KoQuest for Emberveil / KoQuest engine
--- Early compatibility layer v2.0.0-beta1.21
+-- Early compatibility layer v2.0.0-beta1.22
 
 KoQuestEV = KoQuestEV or {}
 local EV = KoQuestEV
-EV.version = "2.0.0-beta1.21"
+EV.version = "2.0.0-beta1.22"
 EV.engine = "KoQuest"
 EV.sourceCommit = "104f35678ca39ab1fb78b655f815cc7016f5e0c8"
 

@@ -5,7 +5,7 @@ import luaparse from "luaparse";
 
 const repo = path.resolve(import.meta.dirname, "..");
 const addon = path.join(repo, "addon", "KoQuest");
-const expectedVersion = "2.0.0-beta1.21";
+const expectedVersion = "2.0.0-beta1.22";
 const failures = [];
 let parsedLua = 0;
 let totalFiles = 0;
@@ -196,6 +196,15 @@ const quest = fs.readFileSync(path.join(addon, "quest.lua"), "utf8");
 const tracker = fs.readFileSync(path.join(addon, "tracker.lua"), "utf8");
 const database = fs.readFileSync(path.join(addon, "database.lua"), "utf8");
 const config = fs.readFileSync(path.join(addon, "config.lua"), "utf8");
+const runtimeSettingConsumers = sourceFiles
+  .filter(({ file }) => !file.endsWith(path.join("KoQuest", "config.lua")))
+  .map(({ source }) => source)
+  .join("\n");
+for (const match of config.matchAll(/config\s*=\s*"([^"]+)"/g)) {
+  if (!runtimeSettingConsumers.includes(match[1])) {
+    fail(`visible setting has no runtime consumer outside config.lua: ${match[1]}`);
+  }
+}
 
 const contracts = [
   [compat.includes(`EV.version = "${expectedVersion}"`), "compatibility-layer version mismatch"],
@@ -253,6 +262,17 @@ const contracts = [
   [!mapEngine.includes(`RenderWorldDots`), "non-hoverable world-map dot layer is still present"],
   [config.includes(`default = "1", type = "checkbox", config = "unverifiedquestgivers"`), "available quest givers are not enabled by default"],
   [config.includes(`KoQuest_config["availabilitydefaultv2"]`), "available quest-giver upgrade migration missing"],
+  [!config.includes(`config = "arrow"`), "unsupported Emberveil route arrow is still exposed in settings"],
+  [!config.includes(`KoQuestInit.checkbox`), "unsupported route arrow is still exposed in the welcome screen"],
+  [config.includes(`KoQuest_config["arrow"] = "0"`), "unsupported route arrow is not compatibility-locked"],
+  [!fs.readFileSync(path.join(addon, "slashcmd.lua"), "utf8").includes(`KoQuest_config["arrow"] = "1"`), "slash command can still enable the unsupported route arrow"],
+  [(config.match(/for _, data in ipairs\(config\)/g) || []).length === 2, "settings layout does not use deterministic array order"],
+  [config.includes(`for i, button in ipairs(buttons) do`), "welcome mode cards do not use deterministic array order"],
+  [config.includes(`CreateFrame("Button", "KoQuestInitMode" .. i, KoQuestInit)`), "welcome mode cards do not have unique frame names"],
+  [config.includes(`KoQuestConfig:ApplyEmberveilSettings(true)`), "welcome screen does not use the validated settings application path"],
+  [config.includes(`local trackerFontSize = KoQuestEVClampRange`), "tracker font size is not safely range-checked"],
+  [config.includes(`local minDropChance = KoQuestEVClampRange`), "minimum drop chance is not safely range-checked"],
+  [config.includes(`KoQuestConfig.emberveilNeedsRebuild = true`), "edited text settings do not request a runtime refresh"],
   [!mapEngine.includes(`math.floor((xPlayer - maxDx) / cellSize) - 1`), "minimap query retains an unnecessary border"],
 ];
 for (const [passed, message] of contracts) if (!passed) fail(message);
